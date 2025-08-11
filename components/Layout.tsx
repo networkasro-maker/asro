@@ -7,7 +7,7 @@ interface LayoutProps {
   user: User;
   onLogout: () => void;
   children: React.ReactNode;
-  onPasswordUpdate: (userId: string, oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
+  onPasswordUpdate: (newPass: string) => Promise<{ success: boolean; message: string }>;
   ispProfile: IspProfile;
   activeView: string;
   setActiveView: (view: string) => void;

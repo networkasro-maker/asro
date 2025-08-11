@@ -1,50 +1,29 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState } from 'react';
 import { User, Customer, InternetPackage, PaymentStatus, IssueReport, ModemLightStatus, CustomerStatus } from '../../types';
 import { WifiIcon, ClockIcon, CheckCircleIcon, CameraIcon } from '../icons';
 import Modal from '../Modal';
-import { supabase } from '../../supabaseClient';
-
 
 interface CustomerDashboardProps {
   user: User;
-  customer: Customer;
+  customer: Customer | undefined;
+  userPackage: InternetPackage | undefined;
+  issueReports: IssueReport[];
+  onIssueReport: (report: Omit<IssueReport, 'id' | 'reportedAt' | 'customerId'>) => Promise<boolean>;
   packages: InternetPackage[];
   activeView?: string;
-  onDataChange: () => void;
 }
 
-const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, customer, packages, activeView, onDataChange }) => {
+const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, customer, userPackage, issueReports, onIssueReport, activeView }) => {
   const [isReportModalOpen, setReportModalOpen] = useState(false);
-  const [issueReports, setIssueReports] = useState<IssueReport[]>([]);
   const [newReport, setNewReport] = useState<{modemLightStatus: ModemLightStatus, description: string, modemVideo?: File | null}>({
       modemLightStatus: ModemLightStatus.GREEN,
       description: '',
       modemVideo: null
   });
-
-  const userPackage = useMemo(() => packages.find(p => p.id === customer?.packageId), [customer, packages]);
-  
-  useEffect(() => {
-    const fetchReports = async () => {
-        if (customer) {
-            const { data, error } = await supabase
-                .from('issue_reports')
-                .select('*')
-                .eq('customer_id', customer.id)
-                .order('reported_at', { ascending: false });
-            if (error) {
-                console.error('Error fetching issue reports:', error);
-            } else {
-                setIssueReports(data as IssueReport[]);
-            }
-        }
-    };
-    fetchReports();
-  }, [customer]);
-
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!customer || !userPackage) {
-    return <div className="text-center p-8 text-white">Data pelanggan tidak ditemukan.</div>;
+    return <div className="text-center p-8 text-white">Data pelanggan tidak ditemukan atau sedang dimuat...</div>;
   }
   
   const handleReportSubmit = async (e: React.FormEvent) => {
@@ -53,27 +32,21 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, customer, p
           alert("Keterangan atau video wajib diisi.");
           return;
       }
-      
-      // Note: Video upload to Supabase Storage is a more complex topic involving secure URLs.
-      // For now, we'll just store a placeholder or skip it.
-      const report: Omit<IssueReport, 'id'> = {
-          customerId: customer.id,
-          reportedAt: new Date().toISOString(),
-          description: newReport.description,
-          modemLightStatus: newReport.modemLightStatus,
-          // modemVideo: newReport.modemVideo // This would need storage logic
-      };
+      setIsSubmitting(true);
+      const success = await onIssueReport({
+        description: newReport.description,
+        modemLightStatus: newReport.modemLightStatus,
+        modemVideo: newReport.modemVideo,
+      });
 
-      const { error } = await supabase.from('issue_reports').insert({ ...report, id: `issue-${Date.now()}` });
-
-      if (error) {
-          alert(`Gagal mengirim laporan: ${error.message}`);
+      if (success) {
+        setReportModalOpen(false);
+        setNewReport({ modemLightStatus: ModemLightStatus.GREEN, description: '', modemVideo: null });
+        alert('Laporan berhasil dikirim!');
       } else {
-          onDataChange(); // Refetch all data including reports
-          setReportModalOpen(false);
-          setNewReport({ modemLightStatus: ModemLightStatus.GREEN, description: '', modemVideo: null });
-          alert('Laporan berhasil dikirim!');
+        alert('Gagal mengirim laporan. Silakan coba lagi.');
       }
+      setIsSubmitting(false);
   };
 
   const InfoCard: React.FC<{icon: React.ReactNode, title: string, value: string, colorClass: string}> = ({icon, title, value, colorClass}) => (
@@ -97,14 +70,14 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, customer, p
             <div className="bg-slate-800 rounded-lg shadow-lg p-6">
               <div className="flow-root">
                 <ul className="-mb-8">
-                  {/* Mock data for billing history */}
+                  {/* TODO: Fetch billing history from Supabase */}
                   <li>
                     <div className="relative pb-8">
                       <span className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-slate-700" aria-hidden="true"></span>
                       <div className="relative flex space-x-3">
                         <div><CheckCircleIcon className="h-8 w-8 text-green-500 bg-slate-800 rounded-full"/></div>
                         <div className="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
-                          <div><p className="text-sm text-slate-400">Pembayaran Tagihan Juli 2024</p></div>
+                          <div><p className="text-sm text-slate-400">Pembayaran Tagihan Juli 2024 (Contoh)</p></div>
                           <div className="text-right text-sm whitespace-nowrap text-slate-500"><time>15 Jul 2024</time></div>
                         </div>
                       </div>
@@ -223,8 +196,10 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, customer, p
                 ></textarea>
             </div>
             <div className="pt-4 flex justify-end">
-                <button type="button" onClick={() => setReportModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg mr-2">Batal</button>
-                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Kirim Laporan</button>
+                <button type="button" onClick={() => setReportModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg mr-2" disabled={isSubmitting}>Batal</button>
+                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500" disabled={isSubmitting}>
+                  {isSubmitting ? 'Mengirim...' : 'Kirim Laporan'}
+                </button>
             </div>
         </form>
       </Modal>

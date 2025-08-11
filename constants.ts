@@ -1,23 +1,21 @@
 import { Role, CustomerStatus, PaymentStatus, User, InternetPackage, Customer, IspProfile, WhatsAppTemplate, ModemLightStatus, IssueReport, AccountStatus, ActivityLog } from './types';
 
-// DATA INI SEKARANG HANYA UNTUK REFERENSI. SUMBER DATA UTAMA ADALAH DATABASE SUPABASE.
-
 export const USERS: User[] = [
   // Super Admin
-  { id: 'user-superadmin', username: 'superadmin', password: '22november', role: Role.SUPER_ADMIN, name: 'Super Admin', status: AccountStatus.ACTIVE },
+  { id: 'user-superadmin', username: 'superadmin', role: Role.SUPER_ADMIN, name: 'Super Admin', status: AccountStatus.ACTIVE },
 
   // Admins
-  { id: 'user-admin', username: 'admin', password: '123', role: Role.ADMIN, name: 'Admin Utama', status: AccountStatus.ACTIVE },
-  { id: 'user-admin1', username: 'admin1', password: '123', role: Role.ADMIN, name: 'Admin Satu', status: AccountStatus.ACTIVE },
-  { id: 'user-admin2', username: 'admin2', password: '123', role: Role.ADMIN, name: 'Admin Dua', status: AccountStatus.ACTIVE },
+  { id: 'user-admin', username: 'admin', role: Role.ADMIN, name: 'Admin Utama', status: AccountStatus.ACTIVE },
+  { id: 'user-admin1', username: 'admin1', role: Role.ADMIN, name: 'Admin Satu', status: AccountStatus.ACTIVE },
+  { id: 'user-admin2', username: 'admin2', role: Role.ADMIN, name: 'Admin Dua', status: AccountStatus.ACTIVE },
   
   // Sales
-  { id: 'user-sales', username: 'sales', password: '123', role: Role.SALES, name: 'Sales Utama', status: AccountStatus.ACTIVE },
-  { id: 'user-sales1', username: 'sales1', password: '123', role: Role.SALES, name: 'Budi Sales', status: AccountStatus.ACTIVE },
-  { id: 'user-sales2', username: 'sales2', password: '123', role: Role.SALES, name: 'Cici Sales', status: AccountStatus.ACTIVE },
-  { id: 'user-sales3', username: 'sales3', password: '123', role: Role.SALES, name: 'Dodi Sales', status: AccountStatus.ACTIVE },
-  { id: 'user-sales4', username: 'sales4', password: '123', role: Role.SALES, name: 'Eka Sales', status: AccountStatus.ACTIVE },
-  { id: 'user-sales5', username: 'sales5', password: '123', role: Role.SALES, name: 'Fani Sales', status: AccountStatus.ACTIVE },
+  { id: 'user-sales', username: 'sales', role: Role.SALES, name: 'Sales Utama', status: AccountStatus.ACTIVE },
+  { id: 'user-sales1', username: 'sales1', role: Role.SALES, name: 'Budi Sales', status: AccountStatus.ACTIVE },
+  { id: 'user-sales2', username: 'sales2', role: Role.SALES, name: 'Cici Sales', status: AccountStatus.ACTIVE },
+  { id: 'user-sales3', username: 'sales3', role: Role.SALES, name: 'Dodi Sales', status: AccountStatus.ACTIVE },
+  { id: 'user-sales4', username: 'sales4', role: Role.SALES, name: 'Eka Sales', status: AccountStatus.ACTIVE },
+  { id: 'user-sales5', username: 'sales5', role: Role.SALES, name: 'Fani Sales', status: AccountStatus.ACTIVE },
 ];
 
 export const PACKAGES: InternetPackage[] = [

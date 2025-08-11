@@ -1,9 +1,8 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, User, AccountStatus, IspProfile } from '../../types';
+import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, User, IspProfile } from '../../types';
 import { CheckCircleIcon, ClockIcon, XCircleIcon, AlertTriangleIcon, UsersIcon, MapPinIcon, FileTextIcon } from '../icons';
 import Modal from '../Modal';
 import InvoiceTemplate from '../InvoiceTemplate';
-import { supabase } from '../../supabaseClient';
 
 declare var XLSX: any;
 declare var htmlToImage: any;
@@ -86,12 +85,13 @@ const AdminDashboard: React.FC<{
   user: User;
   activeView?: string;
   packages: InternetPackage[];
-  addActivityLog: (action: string, user: User) => Promise<void>;
+  addActivityLog: (action: string, user: User) => void;
   customers: Customer[];
   users: User[];
   ispProfile: IspProfile;
-  onDataChange: () => Promise<void>;
-}> = ({ user, activeView, packages, addActivityLog, customers, users, ispProfile, onDataChange }) => {
+  onCustomerUpdate: (customerId: string, updates: Partial<Customer>) => Promise<boolean>;
+  onCustomerAdd: (customerData: Pick<Customer, 'name' | 'address' | 'packageId' | 'dueDate'>, salesId: string) => Promise<boolean>;
+}> = ({ user, activeView, packages, addActivityLog, customers, users, ispProfile, onCustomerUpdate, onCustomerAdd }) => {
     const [filter, setFilter] = useState<PaymentStatus | CustomerStatus | 'All'>('All');
     const [isAddCustomerModalOpen, setAddCustomerModalOpen] = useState(false);
     const [confirmationAction, setConfirmationAction] = useState<{ title: string; message: React.ReactNode; onConfirm: () => void; } | null>(null);
@@ -121,6 +121,7 @@ const AdminDashboard: React.FC<{
             if (activeView === 'my-customers') viewKey = 'customers';
         }
 
+
         if (viewKey === 'my-customers' || viewKey === 'customers') {
             if (filter === 'All') return salesCustomers;
             if (filter === CustomerStatus.ISOLATED) return salesCustomers.filter(c => c.status === CustomerStatus.ISOLATED);
@@ -132,322 +133,244 @@ const AdminDashboard: React.FC<{
     
     useEffect(() => {
         if (invoiceCustomer && invoiceRef.current) {
+            setInvoiceLoading(true);
             htmlToImage.toJpeg(invoiceRef.current, { 
                 quality: 0.98, 
                 backgroundColor: '#ffffff',
-                width: 302, 
+                width: 302, // Approx 80mm for thermal printers
             })
             .then((dataUrl: string) => {
                 setInvoiceImageUrl(dataUrl);
-                setInvoiceLoading(false);
             })
-            .catch((error: any) => {
-                console.error('Gagal membuat gambar faktur!', error);
-                alert('Gagal membuat gambar faktur. Silakan coba lagi.');
+            .catch((err: any) => {
+                console.error('Invoice generation failed:', err);
+                alert('Gagal membuat gambar invoice.');
+                setInvoiceCustomer(null); // Reset on error
+            })
+            .finally(() => {
                 setInvoiceLoading(false);
-                setInvoiceCustomer(null);
             });
         }
     }, [invoiceCustomer]);
 
-    const handleAction = (actionType: string, customer: Customer) => {
-        const performUpdate = async (updates: Partial<Customer>, logMessage: string) => {
-            const { error } = await supabase.from('customers').update(updates).eq('id', customer.id);
-            if (error) {
-                alert(`Gagal memperbarui: ${error.message}`);
-            } else {
-                await addActivityLog(logMessage, user);
-                await onDataChange();
-            }
-            setConfirmationAction(null);
-        };
-        
-        switch (actionType) {
-            case 'cetak':
-                setInvoiceImageUrl(null);
-                setInvoiceLoading(true);
-                setInvoiceCustomer(customer);
-                addActivityLog(`Mencetak invoice untuk ${customer.name} (ID: ${customer.id})`, user);
-                break;
-            case 'confirmPayment':
+    const handleAction = useCallback((actionType: string, customer: Customer) => {
+        const actionMap: {[key: string]: () => void} = {
+            confirmPayment: () => {
                 setConfirmationAction({
-                    title: 'Konfirmasi Pembayaran',
-                    message: `Anda yakin ingin mengonfirmasi pembayaran untuk ${customer.name}? Status akan diubah menjadi LUNAS.`,
-                    onConfirm: () => performUpdate(
-                        { paymentStatus: PaymentStatus.PAID, status: CustomerStatus.ACTIVE },
-                        `Konfirmasi pembayaran untuk pelanggan ${customer.name} (ID: ${customer.id})`
-                    )
-                });
-                break;
-            case 'markAsVerifying':
-                setConfirmationAction({
-                    title: 'Konfirmasi Status',
-                    message: `Ubah status pembayaran ${customer.name} menjadi "Menunggu Verifikasi"?`,
-                    onConfirm: () => performUpdate(
-                        { paymentStatus: PaymentStatus.VERIFYING },
-                        `Menandai pembayaran menunggu verifikasi untuk ${customer.name} (ID: ${customer.id})`
-                    )
-                });
-                break;
-            case 'cancelVerification':
-                setConfirmationAction({
-                    title: 'Batalkan Verifikasi',
-                    message: `Anda yakin ingin membatalkan permintaan verifikasi untuk ${customer.name}? Status akan dikembalikan menjadi "Belum Bayar".`,
-                    onConfirm: () => performUpdate(
-                        { paymentStatus: PaymentStatus.UNPAID },
-                        `Membatalkan permintaan verifikasi untuk ${customer.name} (ID: ${customer.id})`
-                    )
-                });
-                break;
-            case 'toggleIsolate':
-                const isIsolating = customer.status !== CustomerStatus.ISOLATED;
-                setConfirmationAction({
-                    title: isIsolating ? 'Konfirmasi Isolir' : 'Konfirmasi Aktivasi',
-                    message: `Anda yakin ingin ${isIsolating ? 'mengisolir' : 'mengaktifkan kembali'} pelanggan ${customer.name}?`,
-                    onConfirm: () => {
-                        const newStatus = isIsolating ? CustomerStatus.ISOLATED : CustomerStatus.ACTIVE;
-                        const actionText = isIsolating ? 'Mengisolir' : 'Mengaktifkan kembali';
-                        performUpdate({ status: newStatus }, `${actionText} pelanggan ${customer.name} (ID: ${customer.id})`);
+                    title: "Konfirmasi Pembayaran",
+                    message: <>Apakah Anda yakin ingin mengonfirmasi pembayaran untuk <strong>{customer.name}</strong>? Status akan diubah menjadi <strong>Lunas</strong>.</>,
+                    onConfirm: async () => { 
+                        const success = await onCustomerUpdate(customer.id, { paymentStatus: PaymentStatus.PAID });
+                        if (success) addActivityLog(`Konfirmasi pembayaran untuk ${customer.name}`, user);
+                        setConfirmationAction(null);
                     }
                 });
-                break;
+            },
+            toggleIsolate: () => {
+                const isCurrentlyIsolated = customer.status === CustomerStatus.ISOLATED;
+                setConfirmationAction({
+                    title: isCurrentlyIsolated ? "Aktifkan Kembali Pelanggan" : "Isolir Pelanggan",
+                    message: <>Apakah Anda yakin ingin <strong>{isCurrentlyIsolated ? 'mengaktifkan kembali' : 'mengisolir'}</strong> pelanggan <strong>{customer.name}</strong>?</>,
+                    onConfirm: async () => {
+                        const newStatus = isCurrentlyIsolated ? CustomerStatus.ACTIVE : CustomerStatus.ISOLATED;
+                        const success = await onCustomerUpdate(customer.id, { status: newStatus });
+                        if (success) addActivityLog(`${isCurrentlyIsolated ? 'Mengaktifkan kembali' : 'Mengisolir'} pelanggan: ${customer.name}`, user);
+                        setConfirmationAction(null);
+                    }
+                });
+            },
+            markAsVerifying: async () => {
+                const success = await onCustomerUpdate(customer.id, { paymentStatus: PaymentStatus.VERIFYING });
+                if (success) addActivityLog(`Menandai pembayaran ${customer.name} sebagai 'Verifikasi'`, user);
+            },
+            cancelVerification: async () => {
+                 const success = await onCustomerUpdate(customer.id, { paymentStatus: PaymentStatus.UNPAID });
+                 if (success) addActivityLog(`Membatalkan verifikasi pembayaran untuk ${customer.name}`, user);
+            },
+            cetak: () => {
+                setInvoiceCustomer(customer);
+            }
+        };
+
+        actionMap[actionType]?.();
+    }, [onCustomerUpdate, addActivityLog, user]);
+
+    const handleAddCustomer = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const salesId = user.role === Role.SALES ? user.id : newCustomerData.salesId;
+        if (!newCustomerData.name || !newCustomerData.address || !newCustomerData.packageId || !salesId) {
+            alert("Harap lengkapi semua field yang diperlukan.");
+            return;
+        }
+
+        const success = await onCustomerAdd({
+            name: newCustomerData.name,
+            address: newCustomerData.address,
+            packageId: newCustomerData.packageId,
+            dueDate: newCustomerData.dueDate,
+        }, salesId);
+
+        if (success) {
+            setAddCustomerModalOpen(false);
+            setNewCustomerData({
+                name: '', address: '', packageId: packages[0]?.id || '', salesId: '',
+                dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0]
+            });
+        } else {
+            alert("Gagal menambahkan pelanggan. Silakan coba lagi.");
         }
     };
     
-    const handleNewCustomerChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-        const { name, value } = e.target;
-        setNewCustomerData(prev => ({ ...prev, [name]: value }));
-    };
-
-    const handleSaveNewCustomer = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const { name, address, packageId, salesId, dueDate } = newCustomerData;
-
-        if (!name || !address || !packageId || !salesId || !dueDate) {
-            alert("Semua field wajib diisi.");
-            return;
-        }
-        
-        const customerId = `cust-${Date.now()}`;
-        const userId = `user-${Date.now()}`;
-
-        const newCustomerDataForDb: Omit<Customer, 'id'> = {
-            name,
-            address,
-            phone: '',
-            dueDate,
-            packageId,
-            salesId,
-            status: CustomerStatus.ACTIVE,
-            paymentStatus: PaymentStatus.UNPAID,
-            userId: userId,
-        };
-
-        const newCustomerUserForDb: Omit<User, 'id'> = {
-            username: customerId,
-            password: 'password', // Default password
-            role: Role.CUSTOMER,
-            name: name,
-            status: AccountStatus.ACTIVE,
-        };
-        
-        // Use a transaction if possible, or just run them sequentially
-        const { error: userError } = await supabase.from('users').insert({ ...newCustomerUserForDb, id: userId });
-        if (userError) {
-             alert(`Gagal membuat akun user untuk pelanggan: ${userError.message}`);
-             return;
-        }
-
-        const { error: customerError } = await supabase.from('customers').insert({ ...newCustomerDataForDb, id: customerId });
-        if (customerError) {
-            alert(`Gagal menyimpan data pelanggan: ${customerError.message}`);
-            // Potentially delete the user that was just created
-            await supabase.from('users').delete().eq('id', userId);
-            return;
-        }
-        
-        await addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${customerId})`, user);
-        await onDataChange();
-
-        setAddCustomerModalOpen(false);
-        setNewCustomerData({
-            name: '', address: '', packageId: packages[0]?.id || '', salesId: '',
-            dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0]
+    const exportData = () => {
+        const dataToExport = filteredCustomers.map(c => {
+            const pkg = packages.find(p => p.id === c.packageId);
+            const sales = users.find(u => u.id === c.salesId);
+            return {
+                "ID Pelanggan": c.id,
+                "Nama": c.name,
+                "Alamat": c.address,
+                "No. Telepon": c.phone || '-',
+                "Paket": pkg?.name,
+                "Harga": pkg?.price,
+                "Jatuh Tempo": new Date(c.dueDate).toLocaleDateString('id-ID'),
+                "Status Pelanggan": c.status,
+                "Status Pembayaran": c.paymentStatus,
+                "Sales": sales?.name
+            };
         });
+        const ws = XLSX.utils.json_to_sheet(dataToExport);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Pelanggan");
+        XLSX.writeFile(wb, `Data_Pelanggan_ASRO_NET_${new Date().toISOString().split('T')[0]}.xlsx`);
+        addActivityLog('Mengekspor data pelanggan ke Excel.', user);
     };
 
-    const exportToExcel = useCallback(() => {
-        try {
-            const ws = XLSX.utils.json_to_sheet(filteredCustomers.map(c => ({
-                'ID Pelanggan': c.id, 'Nama': c.name,
-                'Paket': packages.find(p => p.id === c.packageId)?.name,
-                'Jatuh Tempo': new Date(c.dueDate).toLocaleDateString('id-ID'),
-                'Status Pembayaran': c.paymentStatus, 'Status Pelanggan': c.status,
-                'Sales': users.find(u => u.id === c.salesId)?.name
-            })));
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Pelanggan");
-            XLSX.writeFile(wb, "Laporan_Pelanggan_ASRO_NET.xlsx");
-            addActivityLog(`Mengekspor data pelanggan (${filter}) ke Excel`, user);
-        } catch (error) {
-            console.error("Failed to export to Excel", error);
-            alert("Gagal mengekspor ke Excel. Pastikan Anda terhubung ke internet.");
-        }
-    }, [filteredCustomers, packages, addActivityLog, user, filter, users]);
+    const getDashboardTitle = () => {
+      switch(user.role){
+        case Role.SUPER_ADMIN:
+        case Role.ADMIN:
+          return "Dashboard Pelanggan";
+        case Role.SALES:
+          return "Dashboard Sales";
+        default:
+          return "Dashboard";
+      }
+    };
+    
+    const renderAddCustomerModal = () => (
+         <Modal isOpen={isAddCustomerModalOpen} onClose={() => setAddCustomerModalOpen(false)} title="Tambah Pelanggan Baru">
+            <form onSubmit={handleAddCustomer} className="space-y-4">
+                 <div><label className="text-slate-300">Nama</label><input type="text" value={newCustomerData.name} onChange={e => setNewCustomerData({...newCustomerData, name: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required /></div>
+                 <div><label className="text-slate-300">Alamat</label><textarea value={newCustomerData.address} onChange={e => setNewCustomerData({...newCustomerData, address: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required /></div>
+                 <div><label className="text-slate-300">Paket</label><select value={newCustomerData.packageId} onChange={e => setNewCustomerData({...newCustomerData, packageId: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required><option value="">Pilih Paket</option>{packages.map(p => <option key={p.id} value={p.id}>{p.name} - Rp{p.price.toLocaleString('id-ID')}</option>)}</select></div>
+                 {user.role !== Role.SALES && (
+                    <div><label className="text-slate-300">Sales</label><select value={newCustomerData.salesId} onChange={e => setNewCustomerData({...newCustomerData, salesId: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required><option value="">Pilih Sales</option>{salesUsers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+                 )}
+                 <div><label className="text-slate-300">Tanggal Jatuh Tempo Berikutnya</label><input type="date" value={newCustomerData.dueDate} onChange={e => setNewCustomerData({...newCustomerData, dueDate: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required /></div>
+                <div className="pt-4 flex justify-end gap-2"><button type="button" onClick={() => setAddCustomerModalOpen(false)} className="bg-slate-600 px-4 py-2 rounded-lg">Batal</button><button type="submit" className="bg-blue-600 px-4 py-2 rounded-lg">Tambah</button></div>
+            </form>
+        </Modal>
+    );
 
-    const StatCard: React.FC<{title:string, count: number, icon:React.ReactNode}> = ({title, count, icon}) => (
-        <div className="bg-slate-800 p-3 rounded-lg flex items-center justify-between">
-            <div>
-                <p className="text-slate-400 text-xs uppercase tracking-wider">{title}</p>
-                <p className="text-xl font-bold text-white">{count}</p>
+    const renderConfirmationModal = () => confirmationAction && (
+        <Modal isOpen={true} onClose={() => setConfirmationAction(null)} title={confirmationAction.title} size="sm">
+            <div className="text-slate-300">{confirmationAction.message}</div>
+            <div className="mt-6 flex justify-end gap-3">
+                <button onClick={() => setConfirmationAction(null)} className="bg-slate-600 font-semibold px-4 py-2 rounded-lg">Batal</button>
+                <button onClick={confirmationAction.onConfirm} className="bg-blue-600 font-semibold px-4 py-2 rounded-lg">Ya, Lanjutkan</button>
             </div>
-            <div className="text-blue-400">{icon}</div>
-        </div>
+        </Modal>
     );
     
-    const filters = [
-        { label: 'Semua', value: 'All' },
-        { label: 'Lunas', value: PaymentStatus.PAID },
-        { label: 'Belum Bayar', value: PaymentStatus.UNPAID },
-        { label: 'Verifikasi', value: PaymentStatus.VERIFYING },
-        { label: 'Isolir', value: CustomerStatus.ISOLATED },
-    ];
-    
-    const customerListForStats = user.role === Role.SALES ? customers.filter(c => c.salesId === user.id) : customers;
+    const renderInvoiceModal = () => (
+         <Modal isOpen={!!invoiceImageUrl} onClose={() => { setInvoiceCustomer(null); setInvoiceImageUrl(null); }} title="Cetak Invoice">
+            <div>
+                 {invoiceImageUrl ? (
+                    <>
+                        <img src={invoiceImageUrl} alt="Invoice" className="w-full border border-slate-600 rounded" />
+                        <a 
+                            href={invoiceImageUrl} 
+                            download={`invoice-${invoiceCustomer?.id}.jpeg`}
+                            className="w-full block text-center mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
+                        >
+                            Download Invoice
+                        </a>
+                    </>
+                 ) : (
+                    <div className="text-center py-10">
+                        <div className="w-12 h-12 border-4 border-dashed rounded-full animate-spin border-blue-500 mx-auto"></div>
+                        <p className="mt-4 text-slate-300">Membuat gambar invoice...</p>
+                    </div>
+                 )}
+            </div>
+        </Modal>
+    );
 
-    const renderContent = () => {
-        switch(activeView) {
-            case 'dashboard':
-                 return (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                       <StatCard title="Total Pelanggan" count={customerListForStats.length} icon={<UsersIcon className="h-6 w-6"/>} />
-                       <StatCard title="Lunas" count={customerListForStats.filter(c => c.paymentStatus === PaymentStatus.PAID && c.status !== CustomerStatus.ISOLATED).length} icon={<CheckCircleIcon className="h-6 w-6"/>} />
-                       <StatCard title="Belum Bayar" count={customerListForStats.filter(c => c.paymentStatus === PaymentStatus.UNPAID && c.status !== CustomerStatus.ISOLATED).length} icon={<XCircleIcon className="h-6 w-6"/>} />
-                       <StatCard title="Isolir" count={customerListForStats.filter(c => c.status === CustomerStatus.ISOLATED).length} icon={<AlertTriangleIcon className="h-6 w-6"/>} />
-                    </div>
-                );
-            case 'customers':
-            case 'my-customers':
-                 return (
-                    <div className="bg-slate-800/50 rounded-lg p-4">
-                        <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
-                            <div className="flex flex-wrap space-x-1 bg-slate-700/50 p-1 rounded-lg">
-                               {filters.map(f => (
-                                    <button key={f.value} onClick={() => setFilter(f.value as any)} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === f.value ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-600'}`}>
-                                        {f.label}
-                                    </button>
-                               ))}
-                            </div>
-                             <div className="flex items-center gap-2">
-                                {user.role === Role.ADMIN && (
-                                    <button onClick={() => setAddCustomerModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg w-full sm:w-auto whitespace-nowrap">
-                                        Tambah Pelanggan
-                                    </button>
-                                )}
-                                <button onClick={exportToExcel} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg w-full sm:w-auto">
-                                    Export ke Excel
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {filteredCustomers.map(customer => (
-                                <CustomerCard key={customer.id} customer={customer} packages={packages} users={users} user={user} onAction={handleAction} />
-                            ))}
-                        </div>
-                         {filteredCustomers.length === 0 && <p className="text-center text-slate-400 py-8">Tidak ada data pelanggan.</p>}
-                    </div>
-                 );
-            case 'reports':
-                return <div className="text-white bg-slate-800 p-6 rounded-lg">Halaman Laporan Pembukuan sedang dalam pengembangan.</div>;
-            case 'issues':
-                return <div className="text-white bg-slate-800 p-6 rounded-lg">Halaman Laporan Gangguan sedang dalam pengembangan.</div>;
-            case 'new-install':
-                 return <div className="text-white bg-slate-800 p-6 rounded-lg">Halaman Request Pemasangan Baru sedang dalam pengembangan.</div>;
-            default:
-                return null;
-        }
+
+    if (user.role === Role.SALES && (activeView === 'new-install' || activeView === 'dashboard')) {
+        return (
+             <div className="bg-slate-800 rounded-lg shadow-lg p-6">
+                 {renderAddCustomerModal()}
+                 <h2 className="text-2xl font-bold text-white mb-4">Request Pemasangan Baru</h2>
+                 <form onSubmit={handleAddCustomer} className="space-y-4">
+                 <div><label className="text-slate-300">Nama</label><input type="text" value={newCustomerData.name} onChange={e => setNewCustomerData({...newCustomerData, name: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required /></div>
+                 <div><label className="text-slate-300">Alamat</label><textarea value={newCustomerData.address} onChange={e => setNewCustomerData({...newCustomerData, address: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required /></div>
+                 <div><label className="text-slate-300">Paket</label><select value={newCustomerData.packageId} onChange={e => setNewCustomerData({...newCustomerData, packageId: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required><option value="">Pilih Paket</option>{packages.map(p => <option key={p.id} value={p.id}>{p.name} - Rp{p.price.toLocaleString('id-ID')}</option>)}</select></div>
+                 <div><label className="text-slate-300">Tanggal Jatuh Tempo Berikutnya</label><input type="date" value={newCustomerData.dueDate} onChange={e => setNewCustomerData({...newCustomerData, dueDate: e.target.value})} className="w-full bg-slate-700 p-2 rounded-lg mt-1" required /></div>
+                 <div className="pt-4 flex justify-end gap-2"><button type="submit" className="w-full bg-blue-600 px-4 py-3 rounded-lg font-bold">Kirim Request</button></div>
+                 </form>
+            </div>
+        )
     }
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-white">Dashboard {user.role}</h1>
+            <header className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-white">{getDashboardTitle()}</h1>
+                    <p className="text-slate-400 mt-1">Kelola data pelanggan, pembayaran, dan status layanan.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    {user.role !== Role.SALES && <button onClick={() => setAddCustomerModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Tambah Pelanggan</button>}
+                    <button onClick={exportData} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-lg">Export Data</button>
+                </div>
+            </header>
 
-            {renderContent()}
+            <div className="flex flex-wrap space-x-1 bg-slate-800/50 p-1 rounded-lg">
+                {(['All', ...Object.values(PaymentStatus), CustomerStatus.ISOLATED] as const).map(s => {
+                    const config = statusConfig[s] || { text: s };
+                    return (
+                        <button key={s} onClick={() => setFilter(s)} className={`px-4 py-1.5 text-sm font-medium rounded-md transition ${filter === s ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:bg-slate-600'}`}>
+                            {s === 'All' ? 'Semua' : config.text}
+                        </button>
+                    )
+                })}
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {filteredCustomers.map(customer => (
+                    <CustomerCard key={customer.id} customer={customer} packages={packages} users={users} user={user} onAction={handleAction} />
+                ))}
+            </div>
 
-            {invoiceCustomer && (
-                <div ref={invoiceRef} className="fixed left-[-9999px] top-0">
-                    <InvoiceTemplate 
-                        customer={invoiceCustomer}
-                        pkg={packages.find(p => p.id === invoiceCustomer.packageId)!}
-                        ispProfile={ispProfile}
-                    />
+            {filteredCustomers.length === 0 && (
+                <div className="text-center py-16 text-slate-400 bg-slate-800 rounded-lg">
+                    <UsersIcon className="mx-auto h-12 w-12 text-slate-500" />
+                    <h3 className="mt-2 text-lg font-medium text-white">Tidak Ada Pelanggan</h3>
+                    <p className="mt-1 text-sm">Tidak ada pelanggan yang cocok dengan filter yang dipilih.</p>
                 </div>
             )}
             
-            <Modal isOpen={!!confirmationAction} onClose={() => setConfirmationAction(null)} title={confirmationAction?.title || 'Konfirmasi'} size="sm">
-                <div className="text-white">
-                    <p className="text-slate-300 mb-6">{confirmationAction?.message}</p>
-                    <div className="flex justify-end gap-3">
-                        <button type="button" onClick={() => setConfirmationAction(null)} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition">Batal</button>
-                        <button type="button" onClick={confirmationAction?.onConfirm} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Ya, Lanjutkan</button>
-                    </div>
-                </div>
-            </Modal>
-            
-            <Modal isOpen={!!invoiceCustomer} onClose={() => setInvoiceCustomer(null)} title={`Invoice untuk ${invoiceCustomer?.name}`} size="sm">
-                <div className="bg-slate-800 p-4 rounded-lg">
-                    {isInvoiceLoading && (
-                        <div className="text-center py-10">
-                            <p className="text-white">Membuat invoice JPG...</p>
-                            <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-blue-500 mx-auto mt-4"></div>
-                        </div>
-                    )}
-                    {invoiceImageUrl && (
-                        <div className="space-y-4">
-                            <img src={invoiceImageUrl} alt={`Invoice for ${invoiceCustomer?.name}`} className="w-full border-2 border-slate-600 rounded-md shadow-lg" />
-                            <a href={invoiceImageUrl} download={`invoice-${invoiceCustomer?.id}.jpg`} className="w-full text-center block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-transform transform hover:scale-105">
-                                Download JPG & Cetak
-                            </a>
-                        </div>
-                    )}
-                </div>
-            </Modal>
+            {/* Hidden div for invoice generation */}
+            <div className="fixed -left-[9999px] top-0">
+                {invoiceCustomer && <div ref={invoiceRef}>
+                    <InvoiceTemplate customer={invoiceCustomer} pkg={packages.find(p => p.id === invoiceCustomer.packageId)!} ispProfile={ispProfile} />
+                </div>}
+            </div>
 
-            <Modal isOpen={isAddCustomerModalOpen} onClose={() => setAddCustomerModalOpen(false)} title="Tambah Pelanggan Baru">
-                <form onSubmit={handleSaveNewCustomer} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Nama Lengkap</label>
-                        <input type="text" name="name" value={newCustomerData.name} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Alamat</label>
-                        <textarea name="address" value={newCustomerData.address} onChange={handleNewCustomerChange} rows={3} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required></textarea>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Paket Internet</label>
-                        <select name="packageId" value={newCustomerData.packageId} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required>
-                            <option value="" disabled>Pilih Paket</option>
-                            {packages.map(p => <option key={p.id} value={p.id}>{p.name} - Rp {p.price.toLocaleString('id-ID')}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Sales</label>
-                        <select name="salesId" value={newCustomerData.salesId} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required>
-                            <option value="" disabled>Pilih Sales</option>
-                            {salesUsers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Tanggal Jatuh Tempo Awal</label>
-                        <input type="date" name="dueDate" value={newCustomerData.dueDate} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
-                    </div>
-                    <div className="pt-4 flex justify-end gap-3">
-                        <button type="button" onClick={() => setAddCustomerModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg">Batal</button>
-                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan Pelanggan</button>
-                    </div>
-                </form>
-            </Modal>
+            {renderAddCustomerModal()}
+            {renderConfirmationModal()}
+            {renderInvoiceModal()}
         </div>
     );
 };
