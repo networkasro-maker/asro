@@ -30,6 +30,7 @@ export enum ModemLightStatus {
 export interface User {
   id: string;
   username: string;
+  password?: string;
   role: Role;
   name: string;
   profilePicture?: string;
@@ -60,14 +61,13 @@ export interface Customer {
 export interface IssueReport {
     id: string;
     customerId: string;
-    modemVideo?: File | string | null; // Allow string for URL from Supabase
+    modemVideo?: File | null;
     modemLightStatus: ModemLightStatus;
     description: string;
     reportedAt: string; // ISO string date
 }
 
 export interface IspProfile {
-    id?: number;
     name: string;
     logoUrl: string;
     address: string;

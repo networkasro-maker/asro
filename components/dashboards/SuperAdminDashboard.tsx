@@ -5,39 +5,30 @@ import { UploadIcon, DownloadIcon, PencilIcon, TrashIcon, PlusCircleIcon } from 
 
 declare var XLSX: any;
 
-type UserFormData = Omit<User, 'id' | 'status' | 'profilePicture'>;
-type PackageFormData = Omit<InternetPackage, 'id'>;
-
 interface ManagementDashboardProps {
   user: User;
   activeView?: string;
   users: User[];
+  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   packages: InternetPackage[];
+  setPackages: React.Dispatch<React.SetStateAction<InternetPackage[]>>;
   activityLogs: ActivityLog[];
-  ispProfile: IspProfile;
-  waTemplates: WhatsAppTemplate[];
   addActivityLog: (action: string, user: User) => void;
-  onUserAdd: (userData: Omit<User, 'id' | 'status'>) => Promise<boolean>;
-  onUserUpdate: (userId: string, updates: Partial<User>) => Promise<boolean>;
-  onPackageAdd: (packageData: PackageFormData) => Promise<boolean>;
-  onPackageUpdate: (packageId: string, updates: Partial<InternetPackage>) => Promise<boolean>;
-  onPackageDelete: (packageId: string) => Promise<boolean>;
-  onProfileUpdate: (profileData: IspProfile) => Promise<boolean>;
-  onWaTemplateAdd: (templateData: Omit<WhatsAppTemplate, 'id'>) => Promise<boolean>;
-  onWaTemplateUpdate: (templateId: string, updates: Partial<WhatsAppTemplate>) => Promise<boolean>;
-  onWaTemplateDelete: (templateId: string) => Promise<boolean>;
+  ispProfile: IspProfile;
+  setIspProfile: React.Dispatch<React.SetStateAction<IspProfile>>;
+  waTemplates: WhatsAppTemplate[];
+  setWaTemplates: React.Dispatch<React.SetStateAction<WhatsAppTemplate[]>>;
 }
 
 const ManagementDashboard: React.FC<ManagementDashboardProps> = ({ 
-  user, activeView, users, packages, activityLogs, ispProfile, waTemplates, addActivityLog,
-  onUserAdd, onUserUpdate, onPackageAdd, onPackageUpdate, onPackageDelete, onProfileUpdate,
-  onWaTemplateAdd, onWaTemplateUpdate, onWaTemplateDelete
+  user, activeView, users, setUsers, packages, setPackages, activityLogs, addActivityLog,
+  ispProfile, setIspProfile, waTemplates, setWaTemplates
 }) => {
   
   // User Management State
   const [isUserModalOpen, setUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [userFormData, setUserFormData] = useState<Partial<UserFormData>>({ role: Role.SALES });
+  const [userFormData, setUserFormData] = useState<Partial<User>>({ name: '', username: '', password: '', role: Role.SALES });
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Package Management State
@@ -48,7 +39,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   const [profileForm, setProfileForm] = useState(ispProfile);
   useEffect(() => { setProfileForm(ispProfile) }, [ispProfile]);
   
-  // Bank Account State - managed within ISP Profile
+  // Bank Account State
   const [isBankAccountModalOpen, setBankAccountModalOpen] = useState(false);
   const [editingBankAccount, setEditingBankAccount] = useState<{ bank: IspProfile['bankAccounts'][0]; index: number } | null>(null);
   const [bankAccountFormData, setBankAccountFormData] = useState({ bankName: '', accountNumber: '', accountName: '' });
@@ -58,26 +49,29 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   const [editingWaTemplate, setEditingWaTemplate] = useState<WhatsAppTemplate | null>(null);
   const [waTemplateFormData, setWaTemplateFormData] = useState<Omit<WhatsAppTemplate, 'id'>>({ name: '', template: '' });
 
+
   // User Management Handlers
-  const handleToggleUserStatus = async (targetUser: User) => {
+  const handleToggleUserStatus = (targetUser: User) => {
     if (user.role === Role.ADMIN && targetUser.role === Role.ADMIN) {
         alert("Aksi tidak diizinkan.");
         return;
     }
-    const newStatus = targetUser.status === AccountStatus.ACTIVE ? AccountStatus.FROZEN : AccountStatus.ACTIVE;
-    const success = await onUserUpdate(targetUser.id, { status: newStatus });
-    if (success) {
-        const actionLog = `${newStatus === AccountStatus.FROZEN ? 'Membekukan' : 'Mengaktifkan'} pengguna: ${targetUser.name}`;
+
+    setUsers(users.map(u => {
+      if (u.id === targetUser.id) {
+        const newStatus = u.status === AccountStatus.ACTIVE ? AccountStatus.FROZEN : AccountStatus.ACTIVE;
+        const actionLog = `${newStatus === AccountStatus.FROZEN ? 'Membekukan' : 'Mengaktifkan'} pengguna: ${u.name}`;
         addActivityLog(actionLog, user);
-    } else {
-        alert("Gagal memperbarui status pengguna.");
-    }
+        return { ...u, status: newStatus };
+      }
+      return u;
+    }));
   };
   
   const openAddUserModal = () => {
     setEditingUser(null);
     const defaultRole = user.role === Role.SUPER_ADMIN ? Role.ADMIN : Role.SALES;
-    setUserFormData({ name: '', username: '', role: defaultRole });
+    setUserFormData({ name: '', username: '', password: '', role: defaultRole });
     setUserModalOpen(true);
   };
 
@@ -87,36 +81,34 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
     setUserModalOpen(true);
   };
   
-  const handleSaveUser = async (e: React.FormEvent) => {
+  const handleSaveUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userFormData.name || !userFormData.username) {
-        alert("Nama dan username wajib diisi.");
+    if (!userFormData.name || !userFormData.username || (editingUser ? false : !userFormData.password)) {
+        alert("Nama, username, dan password wajib diisi untuk pengguna baru.");
         return;
     }
     
-    let success = false;
     if (editingUser) {
         if (user.role === Role.ADMIN && editingUser.role === Role.ADMIN) {
           alert("Admin tidak dapat mengedit data Admin lain.");
           return;
         }
-        success = await onUserUpdate(editingUser.id, userFormData);
-        if (success) addActivityLog(`Memperbarui pengguna: ${userFormData.name}`, user);
+        setUsers(users.map(u => (u.id === editingUser.id ? { ...u, ...userFormData, password: userFormData.password || u.password, role: userFormData.role || u.role } : u)));
+        addActivityLog(`Memperbarui pengguna: ${userFormData.name}`, user);
     } else {
-        const newUser: Omit<User, 'id' | 'status'> = {
+        const newUserWithId: User = {
+            id: `user-${Date.now()}`,
             name: userFormData.name!,
             username: userFormData.username!,
+            password: userFormData.password!,
             role: userFormData.role!,
+            status: AccountStatus.ACTIVE,
         };
-        success = await onUserAdd(newUser);
-        if (success) addActivityLog(`Menambahkan pengguna baru: ${userFormData.name}`, user);
+        setUsers([...users, newUserWithId]);
+        addActivityLog(`Menambahkan pengguna baru: ${userFormData.name}`, user);
     }
     
-    if (success) {
-      setUserModalOpen(false);
-    } else {
-      alert("Gagal menyimpan data pengguna.");
-    }
+    setUserModalOpen(false);
   };
 
   const exportUsersToExcel = () => {
@@ -125,11 +117,11 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         usersToExportQuery = users.filter(u => u.role === Role.SALES);
       }
 
-      const usersToExport = usersToExportQuery.map(({ name, username, role, status }) => ({
-              "Nama": name,
-              "Username (Email)": username,
-              "Role": role,
-              "Status Akun": status,
+      const usersToExport = usersToExportQuery.map(({ name, username, password, role }) => ({
+              Nama: name,
+              Username: username,
+              Password: password,
+              Role: role
           }));
 
       const ws = XLSX.utils.json_to_sheet(usersToExport);
@@ -138,6 +130,84 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       XLSX.writeFile(wb, "Daftar_Pengguna_ASRO_NET.xlsx");
       addActivityLog('Mengekspor data pengguna ke Excel.', user);
   };
+
+  const handleUserImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          try {
+              const data = new Uint8Array(e.target?.result as ArrayBuffer);
+              const workbook = XLSX.read(data, { type: 'array' });
+              const sheetName = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[sheetName];
+              const json = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+              let importedCount = 0;
+              let errorCount = 0;
+              const newUsers: User[] = [];
+
+              const existingUsernames = new Set(users.map(u => u.username));
+
+              json.forEach((row, index) => {
+                  const { Nama, Username, Password, Role: roleValue } = row;
+                  if (!Nama || !Username || !Password || !roleValue) {
+                      console.error(`Baris ${index + 2} kekurangan kolom wajib.`);
+                      errorCount++;
+                      return;
+                  }
+                  
+                  const role = String(roleValue).trim();
+                  if (role !== Role.ADMIN && role !== Role.SALES) {
+                      console.error(`Baris ${index + 2} memiliki role tidak valid: ${role}. Harus 'Admin' atau 'Sales'.`);
+                      errorCount++;
+                      return;
+                  }
+                  
+                  if (user.role === Role.ADMIN && role === Role.ADMIN) {
+                      console.error(`Baris ${index + 2}: Admin tidak dapat mengimpor pengguna dengan role Admin.`);
+                      errorCount++;
+                      return;
+                  }
+
+                  if (existingUsernames.has(Username)) {
+                      console.error(`Baris ${index + 2}: Username '${Username}' sudah ada. Dilewati.`);
+                      errorCount++;
+                      return;
+                  }
+
+                  const newUser: User = {
+                      id: `user-import-${Date.now()}-${index}`,
+                      name: Nama,
+                      username: Username,
+                      password: String(Password),
+                      role: role as Role,
+                      status: AccountStatus.ACTIVE,
+                  };
+                  newUsers.push(newUser);
+                  existingUsernames.add(Username);
+                  importedCount++;
+              });
+              
+              if (newUsers.length > 0) {
+                  setUsers(prev => [...prev, ...newUsers]);
+                  addActivityLog(`Mengimpor ${importedCount} pengguna baru dari Excel.`, user);
+              }
+
+              alert(`Impor Selesai.\nBerhasil: ${importedCount} pengguna.\nGagal/Dilewati: ${errorCount} pengguna.`);
+          } catch (err) {
+              console.error("Gagal memproses file Excel:", err);
+              alert("Gagal memproses file Excel. Pastikan formatnya benar (Kolom: Nama, Username, Password, Role).");
+          } finally {
+              if (event.target) {
+                  event.target.value = '';
+              }
+          }
+      };
+      reader.readAsArrayBuffer(file);
+  };
+
 
   // Package Management Handlers
   const handleEditPackage = (pkg: InternetPackage) => {
@@ -150,15 +220,14 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
     setPackageModalOpen(true);
   };
 
-  const handleDeletePackage = async (packageId: string) => {
+  const handleDeletePackage = (packageId: string) => {
     if (window.confirm("Apakah Anda yakin ingin menghapus paket ini?")) {
-        const success = await onPackageDelete(packageId);
-        if (success) addActivityLog(`Menghapus paket ID: ${packageId}`, user);
-        else alert("Gagal menghapus paket.");
+        setPackages(packages.filter(p => p.id !== packageId));
+        addActivityLog(`Menghapus paket ID: ${packageId}`, user);
     }
   };
 
-  const handleSavePackage = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSavePackage = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const name = formData.get('name') as string;
@@ -169,34 +238,28 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         return;
     }
 
-    let success = false;
     if (editingPackage) {
-        success = await onPackageUpdate(editingPackage.id, { name, price });
-        if (success) addActivityLog(`Memperbarui paket: ${name}`, user);
+        setPackages(packages.map(p => p.id === editingPackage.id ? { ...p, name, price } : p));
+        addActivityLog(`Memperbarui paket: ${name}`, user);
     } else {
-        const newPackage: PackageFormData = { name, price };
-        success = await onPackageAdd(newPackage);
-        if (success) addActivityLog(`Menambahkan paket baru: ${name}`, user);
+        const newPackage: InternetPackage = {
+            id: `pkg-${Date.now()}`,
+            name,
+            price
+        };
+        setPackages([...packages, newPackage]);
+        addActivityLog(`Menambahkan paket baru: ${name}`, user);
     }
-    
-    if (success) {
-      setPackageModalOpen(false);
-      setEditingPackage(null);
-    } else {
-      alert("Gagal menyimpan paket.");
-    }
+    setPackageModalOpen(false);
+    setEditingPackage(null);
   };
   
   // Settings Handlers
-  const handleSaveIspProfile = async (e: React.FormEvent) => {
+  const handleSaveIspProfile = (e: React.FormEvent) => {
       e.preventDefault();
-      const success = await onProfileUpdate(profileForm);
-      if (success) {
-        addActivityLog('Memperbarui profil ISP', user); 
-        alert("Profil ISP berhasil disimpan!");
-      } else {
-        alert("Gagal menyimpan profil ISP.");
-      }
+      setIspProfile(profileForm);
+      addActivityLog('Memperbarui profil ISP', user); 
+      alert("Profil ISP berhasil disimpan!");
   };
   
   const openBankAccountModal = (bank: IspProfile['bankAccounts'][0] | null, index: number | null) => {
@@ -210,41 +273,31 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       setBankAccountModalOpen(true);
   };
 
-  const handleSaveBankAccount = async (e: React.FormEvent) => {
+  const handleSaveBankAccount = (e: React.FormEvent) => {
       e.preventDefault();
       if (!bankAccountFormData.bankName || !bankAccountFormData.accountNumber || !bankAccountFormData.accountName) {
           alert("Semua field rekening bank wajib diisi.");
           return;
       }
       
-      const newBankAccounts = [...profileForm.bankAccounts];
+      const newBankAccounts = [...ispProfile.bankAccounts];
       if (editingBankAccount) {
           newBankAccounts[editingBankAccount.index] = bankAccountFormData;
+          addActivityLog(`Memperbarui rekening bank: ${bankAccountFormData.bankName}`, user);
       } else {
           newBankAccounts.push(bankAccountFormData);
+          addActivityLog(`Menambahkan rekening bank baru: ${bankAccountFormData.bankName}`, user);
       }
-      
-      const success = await onProfileUpdate({...profileForm, bankAccounts: newBankAccounts });
-      
-      if (success) {
-        const action = editingBankAccount ? `Memperbarui rekening bank: ${bankAccountFormData.bankName}` : `Menambahkan rekening bank baru: ${bankAccountFormData.bankName}`;
-        addActivityLog(action, user);
-        setBankAccountModalOpen(false);
-      } else {
-        alert("Gagal menyimpan rekening bank.");
-      }
+      setIspProfile({...ispProfile, bankAccounts: newBankAccounts });
+      setBankAccountModalOpen(false);
   };
 
-  const handleDeleteBankAccount = async (index: number) => {
+  const handleDeleteBankAccount = (index: number) => {
       if (window.confirm("Anda yakin ingin menghapus rekening bank ini?")) {
-          const bankNameToDelete = profileForm.bankAccounts[index].bankName;
-          const newBankAccounts = profileForm.bankAccounts.filter((_, i) => i !== index);
-          const success = await onProfileUpdate({ ...profileForm, bankAccounts: newBankAccounts });
-          if (success) {
-            addActivityLog(`Menghapus rekening bank: ${bankNameToDelete}`, user);
-          } else {
-            alert("Gagal menghapus rekening bank.");
-          }
+          const bankNameToDelete = ispProfile.bankAccounts[index].bankName;
+          const newBankAccounts = ispProfile.bankAccounts.filter((_, i) => i !== index);
+          setIspProfile({...ispProfile, bankAccounts: newBankAccounts });
+          addActivityLog(`Menghapus rekening bank: ${bankNameToDelete}`, user);
       }
   };
 
@@ -259,38 +312,29 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       setWaTemplateModalOpen(true);
   };
   
-  const handleSaveWaTemplate = async (e: React.FormEvent) => {
+  const handleSaveWaTemplate = (e: React.FormEvent) => {
       e.preventDefault();
       if (!waTemplateFormData.name || !waTemplateFormData.template) {
           alert("Nama dan isi templat wajib diisi.");
           return;
       }
       
-      let success = false;
       if (editingWaTemplate) {
-          success = await onWaTemplateUpdate(editingWaTemplate.id, waTemplateFormData);
-          if (success) addActivityLog(`Memperbarui templat WA: ${waTemplateFormData.name}`, user);
+          setWaTemplates(waTemplates.map(t => t.id === editingWaTemplate.id ? { ...t, ...waTemplateFormData } : t));
+          addActivityLog(`Memperbarui templat WA: ${waTemplateFormData.name}`, user);
       } else {
-          success = await onWaTemplateAdd(waTemplateFormData);
-          if (success) addActivityLog(`Menambahkan templat WA baru: ${waTemplateFormData.name}`, user);
+          const newTemplate = { id: `wa-${Date.now()}`, ...waTemplateFormData };
+          setWaTemplates([...waTemplates, newTemplate]);
+          addActivityLog(`Menambahkan templat WA baru: ${waTemplateFormData.name}`, user);
       }
-
-      if (success) {
-        setWaTemplateModalOpen(false);
-      } else {
-        alert("Gagal menyimpan templat WA.");
-      }
+      setWaTemplateModalOpen(false);
   };
   
-  const handleDeleteWaTemplate = async (templateId: string) => {
+  const handleDeleteWaTemplate = (templateId: string) => {
       if (window.confirm("Anda yakin ingin menghapus templat ini?")) {
-          const success = await onWaTemplateDelete(templateId);
-          if (success) {
-              const templateNameToDelete = waTemplates.find(t => t.id === templateId)?.name;
-              addActivityLog(`Menghapus templat WA: ${templateNameToDelete}`, user);
-          } else {
-              alert("Gagal menghapus templat.");
-          }
+          const templateNameToDelete = waTemplates.find(t => t.id === templateId)?.name;
+          setWaTemplates(waTemplates.filter(t => t.id !== templateId));
+          addActivityLog(`Menghapus templat WA: ${templateNameToDelete}`, user);
       }
   };
 
@@ -308,12 +352,16 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <h2 className="text-2xl font-bold text-white">Kelola Pengguna</h2>
                 <div className="flex items-center gap-2 flex-wrap">
-                    {/* Import functionality is complex with Supabase Auth and is removed for now.
-                    <input type="file" ref={fileInputRef} onChange={handleUserImport} className="hidden" accept=".xlsx, .xls" />
+                    <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleUserImport}
+                        className="hidden"
+                        accept=".xlsx, .xls"
+                    />
                     <button onClick={() => fileInputRef.current?.click()} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-3 rounded-lg flex items-center gap-2 text-sm">
                         <UploadIcon className="h-4 w-4" /> Import Excel
                     </button>
-                    */}
                     <button onClick={exportUsersToExcel} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-lg flex items-center gap-2 text-sm">
                         <DownloadIcon className="h-4 w-4" /> Export Excel
                     </button>
@@ -327,7 +375,8 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                 <thead className="text-xs text-slate-400 uppercase bg-slate-700/50">
                   <tr>
                     <th scope="col" className="px-6 py-3">Nama</th>
-                    <th scope="col" className="px-6 py-3">Username (Email)</th>
+                    <th scope="col" className="px-6 py-3">Username</th>
+                    <th scope="col" className="px-6 py-3">Password</th>
                     <th scope="col" className="px-6 py-3">Role</th>
                     <th scope="col" className="px-6 py-3">Status</th>
                     <th scope="col" className="px-6 py-3 text-right">Aksi</th>
@@ -340,6 +389,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                         <tr key={u.id} className="bg-slate-800 border-b border-slate-700 hover:bg-slate-700/50">
                           <td className="px-6 py-4 font-medium text-white">{u.name}</td>
                           <td className="px-6 py-4">{u.username}</td>
+                          <td className="px-6 py-4">{u.password}</td>
                           <td className="px-6 py-4">{u.role}</td>
                           <td className="px-6 py-4">
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.status === AccountStatus.ACTIVE ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -419,7 +469,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                             </tr>
                         </thead>
                         <tbody>
-                            {activityLogs.length > 0 ? [...activityLogs].map(log => (
+                            {activityLogs.length > 0 ? [...activityLogs].reverse().map(log => (
                                 <tr key={log.id} className="bg-slate-800 border-b border-slate-700 hover:bg-slate-700/50">
                                     <td className="px-6 py-4 whitespace-nowrap text-slate-400">{new Date(log.timestamp).toLocaleString('id-ID')}</td>
                                     <td className="px-6 py-4 font-medium text-white">{log.userName}</td>
@@ -462,7 +512,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                         </button>
                     </div>
                     <div className="space-y-3">
-                        {profileForm.bankAccounts.map((bank, index) => (
+                        {ispProfile.bankAccounts.map((bank, index) => (
                             <div key={index} className="flex justify-between items-center bg-slate-700/50 p-3 rounded-lg">
                                 <div>
                                     <p className="font-bold text-white">{bank.bankName}</p>
@@ -474,7 +524,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                                 </div>
                             </div>
                         ))}
-                         {profileForm.bankAccounts.length === 0 && <p className="text-slate-400 text-center py-4">Belum ada rekening bank yang ditambahkan.</p>}
+                         {ispProfile.bankAccounts.length === 0 && <p className="text-slate-400 text-center py-4">Belum ada rekening bank yang ditambahkan.</p>}
                     </div>
                 </div>
 
@@ -537,16 +587,17 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       {/* User Modal */}
       <Modal isOpen={isUserModalOpen} onClose={() => { setUserModalOpen(false); setEditingUser(null); }} title={editingUser ? 'Edit Pengguna' : 'Tambah Akun Baru'}>
          <form onSubmit={handleSaveUser} className="space-y-4">
-            <div className="bg-yellow-500/10 p-3 rounded-lg text-yellow-300 text-sm">
-              <strong>Catatan:</strong> Form ini hanya membuat profil pengguna. Untuk login, akun harus dibuat melalui Supabase Dashboard (Authentication) dengan email yang sama.
-            </div>
             <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1">Nama Lengkap</label>
                 <input type="text" value={userFormData.name || ''} onChange={e => setUserFormData({...userFormData, name: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
             </div>
             <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Username (harus berupa email valid)</label>
-                <input type="email" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
+                <label className="block text-sm font-medium text-slate-300 mb-1">Username</label>
+                <input type="text" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
+            </div>
+            <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Password</label>
+                <input type="text" placeholder={editingUser ? 'Kosongkan jika tidak diubah' : ''} value={userFormData.password || ''} onChange={e => setUserFormData({...userFormData, password: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required={!editingUser}/>
             </div>
              <div>
                 <label className="block text-sm font-medium text-slate-300 mb-1">Role</label>

@@ -7,16 +7,15 @@ interface ChangePasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User;
-  onUpdatePassword: (newPass: string) => Promise<{ success: boolean; message: string }>;
+  onUpdatePassword: (userId: string, oldPass: string, newPass: string) => { success: boolean; message: string };
 }
 
 const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClose, user, onUpdatePassword }) => {
-  const [currentPassword, setCurrentPassword] = useState(''); // Kept for UX, but not used in Supabase update logic
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [loading, setLoading] = useState(false);
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -29,11 +28,10 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
       setConfirmPassword('');
       setError('');
       setSuccess('');
-      setLoading(false);
     }
   }, [isOpen]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
@@ -42,14 +40,12 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
       setError('Password baru dan konfirmasi password tidak cocok.');
       return;
     }
-    if (newPassword.length < 6) {
-      setError('Password baru minimal harus 6 karakter.');
+    if (newPassword.length < 3) {
+      setError('Password baru minimal harus 3 karakter.');
       return;
     }
-    
-    setLoading(true);
-    const result = await onUpdatePassword(newPassword);
-    setLoading(false);
+
+    const result = onUpdatePassword(user.id, currentPassword, newPassword);
 
     if (result.success) {
       setSuccess(result.message);
@@ -68,9 +64,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     show: boolean;
     onToggle: () => void;
-    required?: boolean;
-    placeholder?: string;
-  }> = ({ id, label, value, onChange, show, onToggle, required=true, placeholder='' }) => (
+  }> = ({ id, label, value, onChange, show, onToggle }) => (
     <div>
       <label htmlFor={id} className="text-sm font-medium text-slate-300">{label}</label>
       <div className="relative mt-2">
@@ -80,9 +74,8 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
           type={show ? 'text' : 'password'}
           value={value}
           onChange={onChange}
-          placeholder={placeholder}
           className="w-full pl-10 pr-12 py-3 bg-slate-900/50 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition duration-200"
-          required={required}
+          required
         />
         <button
           type="button"
@@ -105,12 +98,10 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
           onChange={(e) => setCurrentPassword(e.target.value)}
           show={showCurrent}
           onToggle={() => setShowCurrent(!showCurrent)}
-          required={false}
-          placeholder="Verifikasi dilakukan oleh sesi login Anda"
         />
         <PasswordInput
           id="newPassword"
-          label="Password Baru (min. 6 karakter)"
+          label="Password Baru"
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
           show={showNew}
@@ -139,10 +130,8 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
         )}
 
         <div className="pt-4 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition" disabled={loading}>Batal</button>
-          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:bg-slate-600" disabled={loading}>
-             {loading ? 'Menyimpan...' : 'Simpan Perubahan'}
-          </button>
+          <button type="button" onClick={onClose} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition">Batal</button>
+          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Simpan Perubahan</button>
         </div>
       </form>
     </Modal>
