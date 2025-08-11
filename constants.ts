@@ -32,8 +32,9 @@ export const CUSTOMERS: Customer[] = [
 ];
 
 export const ISP_PROFILE: IspProfile = {
+    id: 'isp-profile-main',
     name: 'ASRO.NET',
-    logoUrl: 'https://imgur.com/a/6IxRhVs',
+    logoUrl: 'https://i.imgur.com/R0i1S1y.png',
     address: 'Jl. Raya Bumiayu No. 123, Brebes, Jawa Tengah',
     contact: '0812-3456-7890',
     bankAccounts: [

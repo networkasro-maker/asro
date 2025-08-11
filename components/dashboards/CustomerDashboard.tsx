@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { User, Customer, InternetPackage, PaymentStatus, IssueReport, ModemLightStatus, CustomerStatus } from '../../types';
-import { CUSTOMERS, ISSUE_REPORTS } from '../../constants';
+import { supabase } from '../../supabaseClient';
 import { WifiIcon, ClockIcon, CheckCircleIcon, CameraIcon } from '../icons';
 import Modal from '../Modal';
 
@@ -8,42 +8,56 @@ interface CustomerDashboardProps {
   user: User;
   packages: InternetPackage[];
   activeView?: string;
+  customer?: Customer;
+  issueReports: IssueReport[];
+  refreshData: () => Promise<void>;
 }
 
-const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, activeView }) => {
+const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, activeView, customer, issueReports, refreshData }) => {
   const [isReportModalOpen, setReportModalOpen] = useState(false);
-  const [issueReports, setIssueReports] = useState<IssueReport[]>(ISSUE_REPORTS.filter(r => r.customerId === `cust-${user.id.split('-')[2]}`));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [newReport, setNewReport] = useState<{modemLightStatus: ModemLightStatus, description: string, modemVideo?: File | null}>({
       modemLightStatus: ModemLightStatus.GREEN,
       description: '',
       modemVideo: null
   });
 
-  const customer = useMemo(() => CUSTOMERS.find(c => c.userId === user.id), [user.id]);
   const userPackage = useMemo(() => packages.find(p => p.id === customer?.packageId), [customer, packages]);
 
   if (!customer || !userPackage) {
-    return <div className="text-center p-8 text-white">Data pelanggan tidak ditemukan.</div>;
+    return <div className="text-center p-8 text-white">Data pelanggan tidak ditemukan atau sedang dimuat.</div>;
   }
   
-  const handleReportSubmit = (e: React.FormEvent) => {
+  const handleReportSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!newReport.description && !newReport.modemVideo) {
           alert("Keterangan atau video wajib diisi.");
           return;
       }
-      const report: IssueReport = {
-          id: `issue-${Date.now()}`,
+      setIsSubmitting(true);
+
+      // Note: Video upload to Supabase Storage is not implemented here for simplicity.
+      // This implementation will only save the text-based data.
+      
+      const reportToInsert = {
           customerId: customer.id,
-          reportedAt: new Date().toISOString(),
           description: newReport.description,
           modemLightStatus: newReport.modemLightStatus,
-          modemVideo: newReport.modemVideo
+          // 'modemVideo' field would contain the URL from Supabase Storage
       };
-      setIssueReports(prev => [report, ...prev]);
-      setReportModalOpen(false);
-      setNewReport({ modemLightStatus: ModemLightStatus.GREEN, description: '', modemVideo: null });
-      alert('Laporan berhasil dikirim!');
+
+      const { error } = await supabase.from('issue_reports').insert([reportToInsert]);
+
+      if (error) {
+          alert(`Gagal mengirim laporan: ${error.message}`);
+      } else {
+          alert('Laporan berhasil dikirim!');
+          await refreshData();
+          setReportModalOpen(false);
+          setNewReport({ modemLightStatus: ModemLightStatus.GREEN, description: '', modemVideo: null });
+      }
+      setIsSubmitting(false);
   };
 
   const InfoCard: React.FC<{icon: React.ReactNode, title: string, value: string, colorClass: string}> = ({icon, title, value, colorClass}) => (
@@ -65,27 +79,18 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, a
           <div>
             <h2 className="text-2xl font-bold text-white mb-4">Tagihan & Riwayat Pembayaran</h2>
             <div className="bg-slate-800 rounded-lg shadow-lg p-6">
-              <div className="flow-root">
+              <p className="text-slate-400">Fitur riwayat pembayaran akan segera tersedia.</p>
+              <div className="mt-4 flow-root">
                 <ul className="-mb-8">
-                  {/* Mock data for billing history */}
-                  <li>
-                    <div className="relative pb-8">
-                      <span className="absolute top-4 left-4 -ml-px h-full w-0.5 bg-slate-700" aria-hidden="true"></span>
-                      <div className="relative flex space-x-3">
-                        <div><CheckCircleIcon className="h-8 w-8 text-green-500 bg-slate-800 rounded-full"/></div>
-                        <div className="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
-                          <div><p className="text-sm text-slate-400">Pembayaran Tagihan Juli 2024</p></div>
-                          <div className="text-right text-sm whitespace-nowrap text-slate-500"><time>15 Jul 2024</time></div>
-                        </div>
-                      </div>
-                    </div>
-                  </li>
                    <li>
                     <div className="relative pb-8">
                       <div className="relative flex space-x-3">
                         <div><ClockIcon className="h-8 w-8 text-yellow-500 bg-slate-800 rounded-full"/></div>
                         <div className="min-w-0 flex-1 pt-1.5 flex justify-between space-x-4">
-                          <div><p className="text-sm text-slate-400">Tagihan Agustus 2024</p></div>
+                          <div>
+                            <p className="text-sm text-slate-400">Tagihan Bulan Ini</p>
+                            <p className="font-bold text-white text-lg">Rp {userPackage.price.toLocaleString('id-ID')}</p>
+                          </div>
                           <div className="text-right text-sm whitespace-nowrap text-slate-300 font-semibold"><p>Jatuh Tempo: {new Date(customer.dueDate).toLocaleDateString('id-ID')}</p></div>
                         </div>
                       </div>
@@ -145,7 +150,7 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, a
   return (
     <div className="space-y-8">
       <header className="flex items-center space-x-4">
-        <img src={user.profilePicture} alt="Profile" className="h-20 w-20 rounded-full border-4 border-slate-700" />
+        <img src={user.profilePicture || `https://ui-avatars.com/api/?name=${user.name}&background=0284c7&color=fff`} alt="Profile" className="h-20 w-20 rounded-full border-4 border-slate-700" />
         <div>
           <h1 className="text-3xl font-bold text-white">Selamat Datang, {user.name}!</h1>
           <p className="text-slate-400">ID Pelanggan: {customer.id.toUpperCase()}</p>
@@ -178,7 +183,7 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, a
                             </label>
                             <p className="pl-1">atau rekam langsung</p>
                         </div>
-                        <p className="text-xs text-slate-600">{newReport.modemVideo?.name || 'MP4, MOV, WEBM hingga 10MB'}</p>
+                        <p className="text-xs text-slate-600">{newReport.modemVideo?.name || 'Fitur upload video belum terhubung ke database.'}</p>
                     </div>
                 </div>
             </div>
@@ -194,7 +199,10 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, a
             </div>
             <div className="pt-4 flex justify-end">
                 <button type="button" onClick={() => setReportModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg mr-2">Batal</button>
-                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Kirim Laporan</button>
+                <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500 flex items-center">
+                   {isSubmitting && <div className="w-4 h-4 border-2 border-dashed rounded-full animate-spin border-white mr-2"></div>}
+                   {isSubmitting ? 'Mengirim...' : 'Kirim Laporan'}
+                </button>
             </div>
         </form>
       </Modal>

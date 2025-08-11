@@ -68,6 +68,7 @@ export interface IssueReport {
 }
 
 export interface IspProfile {
+    id: string;
     name: string;
     logoUrl: string;
     address: string;
@@ -88,4 +89,260 @@ export interface ActivityLog {
     userRole: Role;
     action: string;
     timestamp: string; // ISO string date
+}
+
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
+export interface Database {
+  public: {
+    Tables: {
+      activity_logs: {
+        Row: {
+          action: string
+          id: number
+          timestamp: string
+          userId: string
+          userName: string
+          userRole: Role
+        }
+        Insert: {
+          action: string
+          id?: number
+          timestamp?: string
+          userId: string
+          userName: string
+          userRole: Role
+        }
+        Update: {
+          action?: string
+          id?: number
+          timestamp?: string
+          userId?: string
+          userName?: string
+          userRole?: Role
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_logs_userId_fkey"
+            columns: ["userId"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      customers: {
+        Row: {
+          address: string
+          dueDate: string
+          housePhoto: string | null
+          id: string
+          location: Json | null
+          name: string
+          packageId: string
+          paymentStatus: PaymentStatus
+          phone: string | null
+          salesId: string
+          status: CustomerStatus
+          userId: string
+        }
+        Insert: {
+          address: string
+          dueDate: string
+          housePhoto?: string | null
+          id: string
+          location?: Json | null
+          name: string
+          packageId: string
+          paymentStatus: PaymentStatus
+          phone?: string | null
+          salesId: string
+          status: CustomerStatus
+          userId: string
+        }
+        Update: {
+          address?: string
+          dueDate?: string
+          housePhoto?: string | null
+          id?: string
+          location?: Json | null
+          name?: string
+          packageId?: string
+          paymentStatus?: PaymentStatus
+          phone?: string | null
+          salesId?: string
+          status?: CustomerStatus
+          userId?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customers_packageId_fkey"
+            columns: ["packageId"]
+            referencedRelation: "packages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_salesId_fkey"
+            columns: ["salesId"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customers_userId_fkey"
+            columns: ["userId"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      issue_reports: {
+        Row: {
+          customerId: string
+          description: string
+          id: number
+          modemLightStatus: ModemLightStatus
+          modemVideo: string | null
+          reportedAt: string
+        }
+        Insert: {
+          customerId: string
+          description: string
+          id?: number
+          modemLightStatus: ModemLightStatus
+          modemVideo?: string | null
+          reportedAt?: string
+        }
+        Update: {
+          customerId?: string
+          description?: string
+          id?: number
+          modemLightStatus?: ModemLightStatus
+          modemVideo?: string | null
+          reportedAt?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "issue_reports_customerId_fkey"
+            columns: ["customerId"]
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      isp_profile: {
+        Row: {
+          address: string
+          bankAccounts: Json
+          contact: string
+          id: string
+          logoUrl: string
+          name: string
+        }
+        Insert: {
+          address: string
+          bankAccounts: Json
+          contact: string
+          id: string
+          logoUrl: string
+          name: string
+        }
+        Update: {
+          address?: string
+          bankAccounts?: Json
+          contact?: string
+          id?: string
+          logoUrl?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      packages: {
+        Row: {
+          id: string
+          name: string
+          price: number
+        }
+        Insert: {
+          id?: string
+          name: string
+          price: number
+        }
+        Update: {
+          id?: string
+          name?: string
+          price?: number
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          id: string
+          name: string
+          role: Role
+          status: AccountStatus
+          username: string
+          profilePicture: string | null
+        }
+        Insert: {
+          id: string
+          name: string
+          role: Role
+          status: AccountStatus
+          username: string
+          profilePicture?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          role?: Role
+          status?: AccountStatus
+          username?: string
+          profilePicture?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_id_fkey"
+            columns: ["id"]
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      whatsapp_templates: {
+        Row: {
+          id: string
+          name: string
+          template: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          template: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          template?: string
+        }
+        Relationships: []
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
 }

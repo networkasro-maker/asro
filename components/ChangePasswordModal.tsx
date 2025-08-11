@@ -7,31 +7,30 @@ interface ChangePasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User;
-  onUpdatePassword: (userId: string, oldPass: string, newPass: string) => { success: boolean; message: string };
+  onUpdatePassword: (userId: string, oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClose, user, onUpdatePassword }) => {
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [showCurrent, setShowCurrent] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     // Reset form when modal opens
     if (isOpen) {
-      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setError('');
       setSuccess('');
+      setIsSubmitting(false);
     }
   }, [isOpen]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
@@ -40,12 +39,15 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
       setError('Password baru dan konfirmasi password tidak cocok.');
       return;
     }
-    if (newPassword.length < 3) {
-      setError('Password baru minimal harus 3 karakter.');
+    if (newPassword.length < 6) {
+      setError('Password baru minimal harus 6 karakter.');
       return;
     }
-
-    const result = onUpdatePassword(user.id, currentPassword, newPassword);
+    
+    setIsSubmitting(true);
+    // The old password is not sent to the function for security reasons when using Supabase client API.
+    const result = await onUpdatePassword(user.id, '', newPassword);
+    setIsSubmitting(false);
 
     if (result.success) {
       setSuccess(result.message);
@@ -92,14 +94,6 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
     <Modal isOpen={isOpen} onClose={onClose} title="Ubah Password Anda">
       <form onSubmit={handleSubmit} className="space-y-4">
         <PasswordInput
-          id="currentPassword"
-          label="Password Saat Ini"
-          value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
-          show={showCurrent}
-          onToggle={() => setShowCurrent(!showCurrent)}
-        />
-        <PasswordInput
           id="newPassword"
           label="Password Baru"
           value={newPassword}
@@ -131,7 +125,10 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
 
         <div className="pt-4 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition">Batal</button>
-          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Simpan Perubahan</button>
+          <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:bg-slate-500 flex items-center">
+            {isSubmitting && <div className="w-4 h-4 border-2 border-dashed rounded-full animate-spin border-white mr-2"></div>}
+            Simpan Perubahan
+          </button>
         </div>
       </form>
     </Modal>

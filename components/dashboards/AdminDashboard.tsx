@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, User, AccountStatus, IspProfile } from '../../types';
+import { supabase } from '../../supabaseClient';
 import { CheckCircleIcon, ClockIcon, XCircleIcon, AlertTriangleIcon, UsersIcon, MapPinIcon, FileTextIcon } from '../icons';
 import Modal from '../Modal';
 import InvoiceTemplate from '../InvoiceTemplate';
@@ -87,14 +88,14 @@ const AdminDashboard: React.FC<{
   packages: InternetPackage[];
   addActivityLog: (action: string, user: User) => void;
   customers: Customer[];
-  setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>;
   users: User[];
-  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   ispProfile: IspProfile;
-}> = ({ user, activeView, packages, addActivityLog, customers, setCustomers, users, setUsers, ispProfile }) => {
+  refreshData: () => Promise<void>;
+}> = ({ user, activeView, packages, addActivityLog, customers, users, ispProfile, refreshData }) => {
     const [filter, setFilter] = useState<PaymentStatus | CustomerStatus | 'All'>('All');
     const [isAddCustomerModalOpen, setAddCustomerModalOpen] = useState(false);
     const [confirmationAction, setConfirmationAction] = useState<{ title: string; message: React.ReactNode; onConfirm: () => void; } | null>(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     
     const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null);
     const [invoiceImageUrl, setInvoiceImageUrl] = useState<string | null>(null);
@@ -104,6 +105,7 @@ const AdminDashboard: React.FC<{
     const [newCustomerData, setNewCustomerData] = useState({
         name: '',
         address: '',
+        phone: '',
         packageId: packages[0]?.id || '',
         salesId: '',
         dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0]
@@ -136,7 +138,6 @@ const AdminDashboard: React.FC<{
             htmlToImage.toJpeg(invoiceRef.current, { 
                 quality: 0.98, 
                 backgroundColor: '#ffffff',
-                // Set dimensions for thermal printer (approx 80mm width)
                 width: 302, 
             })
                 .then((dataUrl: string) => {
@@ -152,6 +153,19 @@ const AdminDashboard: React.FC<{
         }
     }, [invoiceCustomer]);
 
+    const performDbAction = async (updateLogic: () => Promise<any>, successLog: string) => {
+        setIsSubmitting(true);
+        const { error } = await updateLogic();
+        if (error) {
+            alert(`Operasi gagal: ${error.message}`);
+        } else {
+            addActivityLog(successLog, user);
+            await refreshData();
+        }
+        setConfirmationAction(null);
+        setIsSubmitting(false);
+    };
+
     const handleAction = (actionType: string, customer: Customer) => {
         switch (actionType) {
             case 'cetak':
@@ -164,33 +178,30 @@ const AdminDashboard: React.FC<{
                 setConfirmationAction({
                     title: 'Konfirmasi Pembayaran',
                     message: `Anda yakin ingin mengonfirmasi pembayaran untuk ${customer.name}? Status akan diubah menjadi LUNAS.`,
-                    onConfirm: () => {
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? {...c, paymentStatus: PaymentStatus.PAID, status: CustomerStatus.ACTIVE } : c));
-                        addActivityLog(`Konfirmasi pembayaran untuk pelanggan ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    onConfirm: () => performDbAction(
+                        () => supabase.from('customers').update({ paymentStatus: PaymentStatus.PAID, status: CustomerStatus.ACTIVE }).eq('id', customer.id),
+                        `Konfirmasi pembayaran untuk pelanggan ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
             case 'markAsVerifying':
-                setConfirmationAction({
+                 setConfirmationAction({
                     title: 'Konfirmasi Status',
                     message: `Ubah status pembayaran ${customer.name} menjadi "Menunggu Verifikasi"?`,
-                    onConfirm: () => {
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? {...c, paymentStatus: PaymentStatus.VERIFYING } : c));
-                        addActivityLog(`Menandai pembayaran menunggu verifikasi untuk ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    onConfirm: () => performDbAction(
+                        () => supabase.from('customers').update({ paymentStatus: PaymentStatus.VERIFYING }).eq('id', customer.id),
+                        `Menandai pembayaran menunggu verifikasi untuk ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
             case 'cancelVerification':
                 setConfirmationAction({
                     title: 'Batalkan Verifikasi',
-                    message: `Anda yakin ingin membatalkan permintaan verifikasi untuk ${customer.name}? Status akan dikembalikan menjadi "Belum Bayar".`,
-                    onConfirm: () => {
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? { ...c, paymentStatus: PaymentStatus.UNPAID } : c));
-                        addActivityLog(`Membatalkan permintaan verifikasi untuk ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    message: `Anda yakin ingin membatalkan permintaan verifikasi untuk ${customer.name}?`,
+                    onConfirm: () => performDbAction(
+                        () => supabase.from('customers').update({ paymentStatus: PaymentStatus.UNPAID }).eq('id', customer.id),
+                        `Membatalkan permintaan verifikasi untuk ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
             case 'toggleIsolate':
@@ -198,13 +209,10 @@ const AdminDashboard: React.FC<{
                 setConfirmationAction({
                     title: isIsolating ? 'Konfirmasi Isolir' : 'Konfirmasi Aktivasi',
                     message: `Anda yakin ingin ${isIsolating ? 'mengisolir' : 'mengaktifkan kembali'} pelanggan ${customer.name}?`,
-                    onConfirm: () => {
-                        const newStatus = isIsolating ? CustomerStatus.ISOLATED : CustomerStatus.ACTIVE;
-                        const actionText = isIsolating ? 'Mengisolir' : 'Mengaktifkan kembali';
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? {...c, status: newStatus } : c));
-                        addActivityLog(`${actionText} pelanggan ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    onConfirm: () => performDbAction(
+                        () => supabase.from('customers').update({ status: isIsolating ? CustomerStatus.ISOLATED : CustomerStatus.ACTIVE }).eq('id', customer.id),
+                        `${isIsolating ? 'Mengisolir' : 'Mengaktifkan kembali'} pelanggan ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
         }
@@ -215,52 +223,46 @@ const AdminDashboard: React.FC<{
         setNewCustomerData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSaveNewCustomer = (e: React.FormEvent) => {
+    const handleSaveNewCustomer = async (e: React.FormEvent) => {
         e.preventDefault();
-        const { name, address, packageId, salesId, dueDate } = newCustomerData;
+        const { name, address, packageId, salesId, dueDate, phone } = newCustomerData;
 
         if (!name || !address || !packageId || !salesId || !dueDate) {
             alert("Semua field wajib diisi.");
             return;
         }
+        setIsSubmitting(true);
         
-        const customerId = `cust-${Date.now()}`;
-        const userId = `user-${Date.now()}`;
-
-        const newCustomer: Customer = {
+        // In a real-world scenario, you'd use a Supabase Edge Function to create both
+        // the auth.user and the profile securely. From the client, we can only do this.
+        // This will create the customer, but they won't be able to log in until an admin sets a password
+        // for them in the Supabase dashboard.
+        const customerId = `CUST-${Date.now()}`;
+        const userId = `USER-${Date.now()}`; // Placeholder, will be replaced by an actual auth user id
+        
+        const { error } = await supabase.from('customers').insert([{
             id: customerId,
             name,
             address,
-            phone: '', // Add a dummy phone or leave it empty
+            phone,
             dueDate,
             packageId,
             salesId,
             status: CustomerStatus.ACTIVE,
             paymentStatus: PaymentStatus.UNPAID,
-            userId: userId,
-        };
+            userId: userId, // This should be linked to a real auth user
+        }]);
 
-        const newCustomerUser: User = {
-            id: userId,
-            username: customerId,
-            password: 'password',
-            role: Role.CUSTOMER,
-            name: name,
-            status: AccountStatus.ACTIVE,
-        };
-        
-        setCustomers(prev => [...prev, newCustomer]);
-        setUsers(prev => [...prev, newCustomerUser]);
-        addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${customerId})`, user);
-
-        setAddCustomerModalOpen(false);
-        setNewCustomerData({
-            name: '',
-            address: '',
-            packageId: packages[0]?.id || '',
-            salesId: '',
-            dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0]
-        });
+        if (error) {
+            alert(`Gagal menambah pelanggan: ${error.message}`);
+        } else {
+            addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${customerId})`, user);
+            await refreshData();
+            setAddCustomerModalOpen(false);
+            setNewCustomerData({ name: '', address: '', phone: '', packageId: packages[0]?.id || '', salesId: '', dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0] });
+            alert("Pelanggan baru berhasil ditambahkan. Ingatkan pelanggan untuk mengatur password mereka.");
+        }
+        setIsSubmitting(false);
     };
 
     const exportToExcel = useCallback(() => {
@@ -305,7 +307,6 @@ const AdminDashboard: React.FC<{
     const customerListForStats = user.role === Role.SALES ? customers.filter(c => c.salesId === user.id) : customers;
 
     const renderContent = () => {
-        // Simple router based on activeView
         switch(activeView) {
             case 'dashboard':
                  return (
@@ -380,7 +381,10 @@ const AdminDashboard: React.FC<{
                     <p className="text-slate-300 mb-6">{confirmationAction?.message}</p>
                     <div className="flex justify-end gap-3">
                         <button type="button" onClick={() => setConfirmationAction(null)} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-4 rounded-lg transition">Batal</button>
-                        <button type="button" onClick={confirmationAction?.onConfirm} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">Ya, Lanjutkan</button>
+                        <button type="button" onClick={confirmationAction?.onConfirm} disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition disabled:bg-slate-500 flex items-center">
+                          {isSubmitting && <div className="w-4 h-4 border-2 border-dashed rounded-full animate-spin border-white mr-2"></div>}
+                          Ya, Lanjutkan
+                        </button>
                     </div>
                 </div>
             </Modal>
@@ -415,14 +419,9 @@ const AdminDashboard: React.FC<{
 
             <Modal isOpen={isAddCustomerModalOpen} onClose={() => setAddCustomerModalOpen(false)} title="Tambah Pelanggan Baru">
                 <form onSubmit={handleSaveNewCustomer} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Nama Lengkap</label>
-                        <input type="text" name="name" value={newCustomerData.name} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Alamat</label>
-                        <textarea name="address" value={newCustomerData.address} onChange={handleNewCustomerChange} rows={3} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required></textarea>
-                    </div>
+                    <div><label className="block text-sm font-medium text-slate-300 mb-1">Nama Lengkap</label><input type="text" name="name" value={newCustomerData.name} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
+                    <div><label className="block text-sm font-medium text-slate-300 mb-1">Alamat</label><textarea name="address" value={newCustomerData.address} onChange={handleNewCustomerChange} rows={3} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required></textarea></div>
+                    <div><label className="block text-sm font-medium text-slate-300 mb-1">No. Telepon (WA)</label><input type="tel" name="phone" value={newCustomerData.phone} onChange={handleNewCustomerChange} placeholder="e.g. 6281234567890" className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" /></div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Paket Internet</label>
                         <select name="packageId" value={newCustomerData.packageId} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required>
@@ -437,13 +436,13 @@ const AdminDashboard: React.FC<{
                             {salesUsers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Tanggal Jatuh Tempo Awal</label>
-                        <input type="date" name="dueDate" value={newCustomerData.dueDate} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required />
-                    </div>
+                    <div><label className="block text-sm font-medium text-slate-300 mb-1">Tanggal Jatuh Tempo Awal</label><input type="date" name="dueDate" value={newCustomerData.dueDate} onChange={handleNewCustomerChange} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
                     <div className="pt-4 flex justify-end gap-3">
                         <button type="button" onClick={() => setAddCustomerModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg">Batal</button>
-                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan Pelanggan</button>
+                        <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500 flex items-center">
+                            {isSubmitting && <div className="w-4 h-4 border-2 border-dashed rounded-full animate-spin border-white mr-2"></div>}
+                            Simpan Pelanggan
+                        </button>
                     </div>
                 </form>
             </Modal>

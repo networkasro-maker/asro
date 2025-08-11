@@ -1,90 +1,142 @@
 import React, { useState, useEffect } from 'react';
-import { User, Role, InternetPackage, ActivityLog, Customer, IspProfile, WhatsAppTemplate } from './types';
+import { User, Role, InternetPackage, ActivityLog, Customer, IspProfile, WhatsAppTemplate, IssueReport } from './types';
 import Login from './components/Login';
 import Layout from './components/Layout';
 import AdminDashboard from './components/dashboards/AdminDashboard';
 import ManagementDashboard from './components/dashboards/SuperAdminDashboard';
 import WhatsAppNotificationCenter from './components/dashboards/WhatsAppNotificationCenter';
 import CustomerDashboard from './components/dashboards/CustomerDashboard';
-import { USERS, PACKAGES, ACTIVITY_LOGS, CUSTOMERS, ISP_PROFILE, WHATSAPP_TEMPLATES } from './constants';
-
-// Custom hook to manage state with localStorage. It's a powerful pattern
-// for creating persistent state without a backend.
-function useLocalStorageState<T>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const item = window.localStorage.getItem(key);
-      // If item exists, parse it. Otherwise, return the initial default value.
-      return item ? JSON.parse(item) : defaultValue;
-    } catch (error) {
-      // If parsing fails, log error and return default value.
-      console.error(`Error reading localStorage key “${key}”:`, error);
-      return defaultValue;
-    }
-  });
-
-  // This effect runs whenever the `value` changes, saving it to localStorage.
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch (error) {
-      console.error(`Error setting localStorage key “${key}”:`, error);
-    }
-  }, [key, value]);
-
-  return [value, setValue];
-}
-
+import { supabase } from './supabaseClient';
+import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
-  // Replace useState with our custom hook to make state persistent.
-  const [users, setUsers] = useLocalStorageState<User[]>('asronet_users', USERS);
-  const [packages, setPackages] = useLocalStorageState<InternetPackage[]>('asronet_packages', PACKAGES);
-  const [customers, setCustomers] = useLocalStorageState<Customer[]>('asronet_customers', CUSTOMERS);
-  const [activityLogs, setActivityLogs] = useLocalStorageState<ActivityLog[]>('asronet_activity_logs', ACTIVITY_LOGS);
-  const [ispProfile, setIspProfile] = useLocalStorageState<IspProfile>('asronet_isp_profile', ISP_PROFILE);
-  const [waTemplates, setWaTemplates] = useLocalStorageState<WhatsAppTemplate[]>('asronet_wa_templates', WHATSAPP_TEMPLATES);
-  
+  const [session, setSession] = useState<Session | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // States for data from Supabase
+  const [users, setUsers] = useState<User[]>([]);
+  const [packages, setPackages] = useState<InternetPackage[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [ispProfile, setIspProfile] = useState<IspProfile | null>(null);
+  const [waTemplates, setWaTemplates] = useState<WhatsAppTemplate[]>([]);
+  const [issueReports, setIssueReports] = useState<IssueReport[]>([]);
+  
   const [activeView, setActiveView] = useState('dashboard');
 
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    setActiveView('dashboard'); // Reset view on login
-  };
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false); // Initial load is done
+    });
 
-  const handleLogout = () => {
-    setCurrentUser(null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+  
+  useEffect(() => {
+    if (session) {
+      fetchUserProfileAndData(session.user.id);
+    } else {
+      setCurrentUser(null);
+    }
+  }, [session]);
+
+  const fetchUserProfileAndData = async (userId: string) => {
+    setLoading(true);
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    
+    if (error) {
+        console.error('Error fetching user profile:', error);
+        await supabase.auth.signOut();
+        setCurrentUser(null);
+    } else if (data) {
+        // Here we combine auth.user with our profile data from the 'profiles' table
+        const userWithRole: User = { ...session!.user, ...data };
+        setCurrentUser(userWithRole);
+        await fetchAllData();
+    }
+    setLoading(false);
   };
   
-  const addActivityLog = (action: string, user: User) => {
-    const newLog: ActivityLog = {
-        id: `log-${Date.now()}`,
+  const fetchAllData = async () => {
+    // Note: In a larger app, you'd fetch data more selectively.
+    // For this app's scale, fetching all on login is acceptable.
+    const [
+        packagesRes,
+        customersRes,
+        usersRes,
+        ispProfileRes,
+        waTemplatesRes,
+        activityLogsRes,
+        issueReportsRes
+    ] = await Promise.all([
+        supabase.from('packages').select('*'),
+        supabase.from('customers').select('*'),
+        supabase.from('profiles').select('id, name, role, status, username'), // Fetch non-sensitive user data
+        supabase.from('isp_profile').select('*').limit(1).single(),
+        supabase.from('whatsapp_templates').select('*'),
+        supabase.from('activity_logs').select('*').order('timestamp', { ascending: false }).limit(100),
+        supabase.from('issue_reports').select('*').order('reportedAt', { ascending: false }),
+    ]);
+
+    if (packagesRes.data) setPackages(packagesRes.data);
+    if (customersRes.data) setCustomers(customersRes.data);
+    if (usersRes.data) setUsers(usersRes.data as User[]);
+    if (ispProfileRes.data) setIspProfile(ispProfileRes.data as IspProfile);
+    if (waTemplatesRes.data) setWaTemplates(waTemplatesRes.data);
+    if (activityLogsRes.data) setActivityLogs(activityLogsRes.data);
+    if (issueReportsRes.data) setIssueReports(issueReportsRes.data);
+
+    // Optional: Log errors for debugging
+    [packagesRes, customersRes, usersRes, ispProfileRes, waTemplatesRes, activityLogsRes, issueReportsRes].forEach(res => {
+        if (res.error) console.error("Error fetching data:", res.error.message);
+    });
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    // Clear all data states
+    setUsers([]);
+    setPackages([]);
+    setCustomers([]);
+    setActivityLogs([]);
+    setIspProfile(null);
+    setWaTemplates([]);
+    setIssueReports([]);
+  };
+  
+  const addActivityLog = async (action: string, user: User) => {
+    if (!user) return;
+    const newLog = {
         userId: user.id,
         userName: user.name,
         userRole: user.role,
         action,
-        timestamp: new Date().toISOString()
+        // timestamp is auto-generated by DB
     };
-    setActivityLogs(prevLogs => [...prevLogs, newLog]);
+    const { data, error } = await supabase.from('activity_logs').insert([newLog]).select();
+    if (data) {
+        setActivityLogs(prevLogs => [data[0], ...prevLogs]);
+    }
+    if (error) console.error('Error adding activity log:', error);
   };
 
-  const handlePasswordUpdate = (userId: string, oldPass: string, newPass: string): { success: boolean; message: string } => {
-    const user = users.find(u => u.id === userId);
+  const handlePasswordUpdate = async (userId: string, oldPass: string, newPass: string): Promise<{ success: boolean; message: string }> => {
+    // Note: Supabase's updateUser doesn't require old password from client for security.
+    // For a real app, re-authentication would be a better pattern.
+    const { error } = await supabase.auth.updateUser({ password: newPass });
 
-    if (!user) {
-        return { success: false, message: 'Pengguna tidak ditemukan.' };
+    if (error) {
+        return { success: false, message: 'Gagal memperbarui password: ' + error.message };
     }
-
-    if (user.password !== oldPass) {
-        return { success: false, message: 'Password saat ini salah.' };
-    }
-
-    setUsers(prevUsers => 
-        prevUsers.map(u => u.id === userId ? { ...u, password: newPass } : u)
-    );
     
-    addActivityLog('Mengubah password.', user);
+    if(currentUser) addActivityLog('Mengubah password.', currentUser);
     
     return { success: true, message: 'Password berhasil diperbarui!' };
   };
@@ -101,16 +153,13 @@ const App: React.FC = () => {
         return <ManagementDashboard
             user={currentUser}
             users={users}
-            setUsers={setUsers}
             packages={packages}
-            setPackages={setPackages}
             activityLogs={activityLogs}
             addActivityLog={addActivityLog}
-            ispProfile={ispProfile}
-            setIspProfile={setIspProfile}
+            ispProfile={ispProfile!}
             waTemplates={waTemplates}
-            setWaTemplates={setWaTemplates}
             activeView={activeView}
+            refreshData={fetchAllData}
         />;
     }
     
@@ -133,25 +182,44 @@ const App: React.FC = () => {
                     packages={packages} 
                     addActivityLog={addActivityLog}
                     customers={customers}
-                    setCustomers={setCustomers}
                     users={users}
-                    setUsers={setUsers}
-                    ispProfile={ispProfile}
+                    ispProfile={ispProfile!}
                     activeView={activeView}
+                    refreshData={fetchAllData}
                 />;
       case Role.CUSTOMER:
+        const customerData = customers.find(c => c.userId === currentUser.id);
+        const customerReports = issueReports.filter(r => r.customerId === customerData?.id);
         return <CustomerDashboard 
                     user={currentUser} 
                     packages={packages} 
                     activeView={activeView}
+                    customer={customerData}
+                    issueReports={customerReports}
+                    refreshData={fetchAllData}
                 />;
       default:
         return <div>Anda tidak memiliki akses ke dasbor ini.</div>;
     }
   };
+  
+  const defaultIspProfile: IspProfile = { id: 'default', name: "ASRO.NET", logoUrl: "https://i.imgur.com/R0i1S1y.png", address: "Memuat...", contact: "", bankAccounts: [] };
+
+  if (loading) {
+      return (
+          <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
+            <img src={defaultIspProfile.logoUrl} alt="Logo" className="h-20 animate-pulse" />
+            <p className="mt-4 text-xl tracking-wider">Memuat Sistem...</p>
+          </div>
+      )
+  }
 
   if (!currentUser) {
-    return <Login onLogin={handleLogin} users={users} ispProfile={ispProfile} />;
+    return <Login ispProfile={ispProfile || defaultIspProfile} />;
+  }
+  
+  if (!ispProfile) {
+    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Profil ISP tidak dapat dimuat. Periksa koneksi dan pengaturan Supabase Anda.</div>;
   }
 
   return (
