@@ -1,0 +1,8 @@
+{
+  "name": "ASRO.NET Billing Management",
+  "description": "A comprehensive billing and customer management system for a local internet service provider (ISP). It includes role-based access for super admins, admins, sales staff, and customers, with features for user management, package management, customer data, billing, issue reporting, and promotional banners.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "prompt": ""
+}
