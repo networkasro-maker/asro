@@ -3,6 +3,7 @@ import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, User, A
 import { CheckCircleIcon, ClockIcon, XCircleIcon, AlertTriangleIcon, UsersIcon, MapPinIcon, FileTextIcon } from '../icons';
 import Modal from '../Modal';
 import InvoiceTemplate from '../InvoiceTemplate';
+import { supabase } from '../../supabaseClient';
 
 declare var XLSX: any;
 declare var htmlToImage: any;
@@ -85,13 +86,12 @@ const AdminDashboard: React.FC<{
   user: User;
   activeView?: string;
   packages: InternetPackage[];
-  addActivityLog: (action: string, user: User) => void;
+  addActivityLog: (action: string, user: User) => Promise<void>;
   customers: Customer[];
-  setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>;
   users: User[];
-  setUsers: React.Dispatch<React.SetStateAction<User[]>>;
   ispProfile: IspProfile;
-}> = ({ user, activeView, packages, addActivityLog, customers, setCustomers, users, setUsers, ispProfile }) => {
+  onDataChange: () => Promise<void>;
+}> = ({ user, activeView, packages, addActivityLog, customers, users, ispProfile, onDataChange }) => {
     const [filter, setFilter] = useState<PaymentStatus | CustomerStatus | 'All'>('All');
     const [isAddCustomerModalOpen, setAddCustomerModalOpen] = useState(false);
     const [confirmationAction, setConfirmationAction] = useState<{ title: string; message: React.ReactNode; onConfirm: () => void; } | null>(null);
@@ -121,7 +121,6 @@ const AdminDashboard: React.FC<{
             if (activeView === 'my-customers') viewKey = 'customers';
         }
 
-
         if (viewKey === 'my-customers' || viewKey === 'customers') {
             if (filter === 'All') return salesCustomers;
             if (filter === CustomerStatus.ISOLATED) return salesCustomers.filter(c => c.status === CustomerStatus.ISOLATED);
@@ -136,23 +135,33 @@ const AdminDashboard: React.FC<{
             htmlToImage.toJpeg(invoiceRef.current, { 
                 quality: 0.98, 
                 backgroundColor: '#ffffff',
-                // Set dimensions for thermal printer (approx 80mm width)
                 width: 302, 
             })
-                .then((dataUrl: string) => {
-                    setInvoiceImageUrl(dataUrl);
-                    setInvoiceLoading(false);
-                })
-                .catch((error: any) => {
-                    console.error('Gagal membuat gambar faktur!', error);
-                    alert('Gagal membuat gambar faktur. Silakan coba lagi.');
-                    setInvoiceLoading(false);
-                    setInvoiceCustomer(null);
-                });
+            .then((dataUrl: string) => {
+                setInvoiceImageUrl(dataUrl);
+                setInvoiceLoading(false);
+            })
+            .catch((error: any) => {
+                console.error('Gagal membuat gambar faktur!', error);
+                alert('Gagal membuat gambar faktur. Silakan coba lagi.');
+                setInvoiceLoading(false);
+                setInvoiceCustomer(null);
+            });
         }
     }, [invoiceCustomer]);
 
     const handleAction = (actionType: string, customer: Customer) => {
+        const performUpdate = async (updates: Partial<Customer>, logMessage: string) => {
+            const { error } = await supabase.from('customers').update(updates).eq('id', customer.id);
+            if (error) {
+                alert(`Gagal memperbarui: ${error.message}`);
+            } else {
+                await addActivityLog(logMessage, user);
+                await onDataChange();
+            }
+            setConfirmationAction(null);
+        };
+        
         switch (actionType) {
             case 'cetak':
                 setInvoiceImageUrl(null);
@@ -164,33 +173,30 @@ const AdminDashboard: React.FC<{
                 setConfirmationAction({
                     title: 'Konfirmasi Pembayaran',
                     message: `Anda yakin ingin mengonfirmasi pembayaran untuk ${customer.name}? Status akan diubah menjadi LUNAS.`,
-                    onConfirm: () => {
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? {...c, paymentStatus: PaymentStatus.PAID, status: CustomerStatus.ACTIVE } : c));
-                        addActivityLog(`Konfirmasi pembayaran untuk pelanggan ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    onConfirm: () => performUpdate(
+                        { paymentStatus: PaymentStatus.PAID, status: CustomerStatus.ACTIVE },
+                        `Konfirmasi pembayaran untuk pelanggan ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
             case 'markAsVerifying':
                 setConfirmationAction({
                     title: 'Konfirmasi Status',
                     message: `Ubah status pembayaran ${customer.name} menjadi "Menunggu Verifikasi"?`,
-                    onConfirm: () => {
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? {...c, paymentStatus: PaymentStatus.VERIFYING } : c));
-                        addActivityLog(`Menandai pembayaran menunggu verifikasi untuk ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    onConfirm: () => performUpdate(
+                        { paymentStatus: PaymentStatus.VERIFYING },
+                        `Menandai pembayaran menunggu verifikasi untuk ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
             case 'cancelVerification':
                 setConfirmationAction({
                     title: 'Batalkan Verifikasi',
                     message: `Anda yakin ingin membatalkan permintaan verifikasi untuk ${customer.name}? Status akan dikembalikan menjadi "Belum Bayar".`,
-                    onConfirm: () => {
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? { ...c, paymentStatus: PaymentStatus.UNPAID } : c));
-                        addActivityLog(`Membatalkan permintaan verifikasi untuk ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
-                    }
+                    onConfirm: () => performUpdate(
+                        { paymentStatus: PaymentStatus.UNPAID },
+                        `Membatalkan permintaan verifikasi untuk ${customer.name} (ID: ${customer.id})`
+                    )
                 });
                 break;
             case 'toggleIsolate':
@@ -201,9 +207,7 @@ const AdminDashboard: React.FC<{
                     onConfirm: () => {
                         const newStatus = isIsolating ? CustomerStatus.ISOLATED : CustomerStatus.ACTIVE;
                         const actionText = isIsolating ? 'Mengisolir' : 'Mengaktifkan kembali';
-                        setCustomers(prev => prev.map(c => c.id === customer.id ? {...c, status: newStatus } : c));
-                        addActivityLog(`${actionText} pelanggan ${customer.name} (ID: ${customer.id})`, user);
-                        setConfirmationAction(null);
+                        performUpdate({ status: newStatus }, `${actionText} pelanggan ${customer.name} (ID: ${customer.id})`);
                     }
                 });
                 break;
@@ -215,7 +219,7 @@ const AdminDashboard: React.FC<{
         setNewCustomerData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSaveNewCustomer = (e: React.FormEvent) => {
+    const handleSaveNewCustomer = async (e: React.FormEvent) => {
         e.preventDefault();
         const { name, address, packageId, salesId, dueDate } = newCustomerData;
 
@@ -227,11 +231,10 @@ const AdminDashboard: React.FC<{
         const customerId = `cust-${Date.now()}`;
         const userId = `user-${Date.now()}`;
 
-        const newCustomer: Customer = {
-            id: customerId,
+        const newCustomerDataForDb: Omit<Customer, 'id'> = {
             name,
             address,
-            phone: '', // Add a dummy phone or leave it empty
+            phone: '',
             dueDate,
             packageId,
             salesId,
@@ -240,25 +243,35 @@ const AdminDashboard: React.FC<{
             userId: userId,
         };
 
-        const newCustomerUser: User = {
-            id: userId,
+        const newCustomerUserForDb: Omit<User, 'id'> = {
             username: customerId,
-            password: 'password',
+            password: 'password', // Default password
             role: Role.CUSTOMER,
             name: name,
             status: AccountStatus.ACTIVE,
         };
         
-        setCustomers(prev => [...prev, newCustomer]);
-        setUsers(prev => [...prev, newCustomerUser]);
-        addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${customerId})`, user);
+        // Use a transaction if possible, or just run them sequentially
+        const { error: userError } = await supabase.from('users').insert({ ...newCustomerUserForDb, id: userId });
+        if (userError) {
+             alert(`Gagal membuat akun user untuk pelanggan: ${userError.message}`);
+             return;
+        }
+
+        const { error: customerError } = await supabase.from('customers').insert({ ...newCustomerDataForDb, id: customerId });
+        if (customerError) {
+            alert(`Gagal menyimpan data pelanggan: ${customerError.message}`);
+            // Potentially delete the user that was just created
+            await supabase.from('users').delete().eq('id', userId);
+            return;
+        }
+        
+        await addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${customerId})`, user);
+        await onDataChange();
 
         setAddCustomerModalOpen(false);
         setNewCustomerData({
-            name: '',
-            address: '',
-            packageId: packages[0]?.id || '',
-            salesId: '',
+            name: '', address: '', packageId: packages[0]?.id || '', salesId: '',
             dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0]
         });
     };
@@ -266,12 +279,10 @@ const AdminDashboard: React.FC<{
     const exportToExcel = useCallback(() => {
         try {
             const ws = XLSX.utils.json_to_sheet(filteredCustomers.map(c => ({
-                'ID Pelanggan': c.id,
-                'Nama': c.name,
+                'ID Pelanggan': c.id, 'Nama': c.name,
                 'Paket': packages.find(p => p.id === c.packageId)?.name,
                 'Jatuh Tempo': new Date(c.dueDate).toLocaleDateString('id-ID'),
-                'Status Pembayaran': c.paymentStatus,
-                'Status Pelanggan': c.status,
+                'Status Pembayaran': c.paymentStatus, 'Status Pelanggan': c.status,
                 'Sales': users.find(u => u.id === c.salesId)?.name
             })));
             const wb = XLSX.utils.book_new();
@@ -305,7 +316,6 @@ const AdminDashboard: React.FC<{
     const customerListForStats = user.role === Role.SALES ? customers.filter(c => c.salesId === user.id) : customers;
 
     const renderContent = () => {
-        // Simple router based on activeView
         switch(activeView) {
             case 'dashboard':
                  return (
@@ -385,12 +395,7 @@ const AdminDashboard: React.FC<{
                 </div>
             </Modal>
             
-            <Modal 
-                isOpen={!!invoiceCustomer} 
-                onClose={() => setInvoiceCustomer(null)} 
-                title={`Invoice untuk ${invoiceCustomer?.name}`}
-                size="sm"
-            >
+            <Modal isOpen={!!invoiceCustomer} onClose={() => setInvoiceCustomer(null)} title={`Invoice untuk ${invoiceCustomer?.name}`} size="sm">
                 <div className="bg-slate-800 p-4 rounded-lg">
                     {isInvoiceLoading && (
                         <div className="text-center py-10">
@@ -401,11 +406,7 @@ const AdminDashboard: React.FC<{
                     {invoiceImageUrl && (
                         <div className="space-y-4">
                             <img src={invoiceImageUrl} alt={`Invoice for ${invoiceCustomer?.name}`} className="w-full border-2 border-slate-600 rounded-md shadow-lg" />
-                            <a
-                                href={invoiceImageUrl}
-                                download={`invoice-${invoiceCustomer?.id}.jpg`}
-                                className="w-full text-center block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-transform transform hover:scale-105"
-                            >
+                            <a href={invoiceImageUrl} download={`invoice-${invoiceCustomer?.id}.jpg`} className="w-full text-center block bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-transform transform hover:scale-105">
                                 Download JPG & Cetak
                             </a>
                         </div>

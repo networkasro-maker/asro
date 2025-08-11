@@ -1,5 +1,7 @@
 import { Role, CustomerStatus, PaymentStatus, User, InternetPackage, Customer, IspProfile, WhatsAppTemplate, ModemLightStatus, IssueReport, AccountStatus, ActivityLog } from './types';
 
+// DATA INI SEKARANG HANYA UNTUK REFERENSI. SUMBER DATA UTAMA ADALAH DATABASE SUPABASE.
+
 export const USERS: User[] = [
   // Super Admin
   { id: 'user-superadmin', username: 'superadmin', password: '22november', role: Role.SUPER_ADMIN, name: 'Super Admin', status: AccountStatus.ACTIVE },

@@ -1,49 +1,79 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, Customer, InternetPackage, PaymentStatus, IssueReport, ModemLightStatus, CustomerStatus } from '../../types';
-import { CUSTOMERS, ISSUE_REPORTS } from '../../constants';
 import { WifiIcon, ClockIcon, CheckCircleIcon, CameraIcon } from '../icons';
 import Modal from '../Modal';
+import { supabase } from '../../supabaseClient';
+
 
 interface CustomerDashboardProps {
   user: User;
+  customer: Customer;
   packages: InternetPackage[];
   activeView?: string;
+  onDataChange: () => void;
 }
 
-const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, activeView }) => {
+const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, customer, packages, activeView, onDataChange }) => {
   const [isReportModalOpen, setReportModalOpen] = useState(false);
-  const [issueReports, setIssueReports] = useState<IssueReport[]>(ISSUE_REPORTS.filter(r => r.customerId === `cust-${user.id.split('-')[2]}`));
+  const [issueReports, setIssueReports] = useState<IssueReport[]>([]);
   const [newReport, setNewReport] = useState<{modemLightStatus: ModemLightStatus, description: string, modemVideo?: File | null}>({
       modemLightStatus: ModemLightStatus.GREEN,
       description: '',
       modemVideo: null
   });
 
-  const customer = useMemo(() => CUSTOMERS.find(c => c.userId === user.id), [user.id]);
   const userPackage = useMemo(() => packages.find(p => p.id === customer?.packageId), [customer, packages]);
+  
+  useEffect(() => {
+    const fetchReports = async () => {
+        if (customer) {
+            const { data, error } = await supabase
+                .from('issue_reports')
+                .select('*')
+                .eq('customer_id', customer.id)
+                .order('reported_at', { ascending: false });
+            if (error) {
+                console.error('Error fetching issue reports:', error);
+            } else {
+                setIssueReports(data as IssueReport[]);
+            }
+        }
+    };
+    fetchReports();
+  }, [customer]);
+
 
   if (!customer || !userPackage) {
     return <div className="text-center p-8 text-white">Data pelanggan tidak ditemukan.</div>;
   }
   
-  const handleReportSubmit = (e: React.FormEvent) => {
+  const handleReportSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!newReport.description && !newReport.modemVideo) {
           alert("Keterangan atau video wajib diisi.");
           return;
       }
-      const report: IssueReport = {
-          id: `issue-${Date.now()}`,
+      
+      // Note: Video upload to Supabase Storage is a more complex topic involving secure URLs.
+      // For now, we'll just store a placeholder or skip it.
+      const report: Omit<IssueReport, 'id'> = {
           customerId: customer.id,
           reportedAt: new Date().toISOString(),
           description: newReport.description,
           modemLightStatus: newReport.modemLightStatus,
-          modemVideo: newReport.modemVideo
+          // modemVideo: newReport.modemVideo // This would need storage logic
       };
-      setIssueReports(prev => [report, ...prev]);
-      setReportModalOpen(false);
-      setNewReport({ modemLightStatus: ModemLightStatus.GREEN, description: '', modemVideo: null });
-      alert('Laporan berhasil dikirim!');
+
+      const { error } = await supabase.from('issue_reports').insert({ ...report, id: `issue-${Date.now()}` });
+
+      if (error) {
+          alert(`Gagal mengirim laporan: ${error.message}`);
+      } else {
+          onDataChange(); // Refetch all data including reports
+          setReportModalOpen(false);
+          setNewReport({ modemLightStatus: ModemLightStatus.GREEN, description: '', modemVideo: null });
+          alert('Laporan berhasil dikirim!');
+      }
   };
 
   const InfoCard: React.FC<{icon: React.ReactNode, title: string, value: string, colorClass: string}> = ({icon, title, value, colorClass}) => (
@@ -145,7 +175,7 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, a
   return (
     <div className="space-y-8">
       <header className="flex items-center space-x-4">
-        <img src={user.profilePicture} alt="Profile" className="h-20 w-20 rounded-full border-4 border-slate-700" />
+        <img src={user.profilePicture || `https://ui-avatars.com/api/?name=${user.name}&background=0284c7&color=fff`} alt="Profile" className="h-20 w-20 rounded-full border-4 border-slate-700" />
         <div>
           <h1 className="text-3xl font-bold text-white">Selamat Datang, {user.name}!</h1>
           <p className="text-slate-400">ID Pelanggan: {customer.id.toUpperCase()}</p>

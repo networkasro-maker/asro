@@ -7,7 +7,7 @@ interface ChangePasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User;
-  onUpdatePassword: (userId: string, oldPass: string, newPass: string) => { success: boolean; message: string };
+  onUpdatePassword: (userId: string, oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
 }
 
 const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClose, user, onUpdatePassword }) => {
@@ -31,7 +31,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
     }
   }, [isOpen]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccess('');
@@ -45,7 +45,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ isOpen, onClo
       return;
     }
 
-    const result = onUpdatePassword(user.id, currentPassword, newPassword);
+    const result = await onUpdatePassword(user.id, currentPassword, newPassword);
 
     if (result.success) {
       setSuccess(result.message);
