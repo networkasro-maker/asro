@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { User } from '../types';
+import { AppUser } from '../types';
 import Modal from './Modal';
 import { LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, XCircleIcon } from './icons';
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
-  user: User;
+  user: AppUser;
   onUpdatePassword: (userId: string, oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
 }
 

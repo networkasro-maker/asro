@@ -1,6 +1,7 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
-import { User, Role, InternetPackage, IspProfile, WhatsAppTemplate, AccountStatus, ActivityLog } from '../../types';
+import { AppUser, Role, InternetPackage, IspProfile, WhatsAppTemplate, AccountStatus, ActivityLog } from '../../types';
 import Modal from '../Modal';
 import { supabase } from '../../supabaseClient';
 import { DownloadIcon, PencilIcon, TrashIcon, PlusCircleIcon, KeyIcon } from '../icons';
@@ -8,12 +9,12 @@ import { DownloadIcon, PencilIcon, TrashIcon, PlusCircleIcon, KeyIcon } from '..
 declare var XLSX: any;
 
 interface ManagementDashboardProps {
-  user: User;
+  user: AppUser;
   activeView?: string;
-  users: User[];
+  users: AppUser[];
   packages: InternetPackage[];
   activityLogs: ActivityLog[];
-  addActivityLog: (action: string, user: User) => void;
+  addActivityLog: (action: string, user: AppUser) => void;
   ispProfile: IspProfile;
   waTemplates: WhatsAppTemplate[];
   refreshData: () => Promise<void>;
@@ -26,8 +27,8 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserModalOpen, setUserModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [userFormData, setUserFormData] = useState<Partial<User>>({ name: '', username: '', role: Role.SALES });
+  const [editingUser, setEditingUser] = useState<AppUser | null>(null);
+  const [userFormData, setUserFormData] = useState<Partial<AppUser>>({ name: '', username: '', role: Role.SALES });
   
   const [isPackageModalOpen, setPackageModalOpen] = useState(false);
   const [editingPackage, setEditingPackage] = useState<InternetPackage | null>(null);
@@ -39,10 +40,8 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   const [editingWaTemplate, setEditingWaTemplate] = useState<WhatsAppTemplate | null>(null);
   const [waTemplateFormData, setWaTemplateFormData] = useState<Omit<WhatsAppTemplate, 'id'>>({ name: '', template: '' });
   
-  const [serviceRoleKey, setServiceRoleKey] = useState('');
-  const [tempServiceRoleKey, setTempServiceRoleKey] = useState('');
 
-  const handleToggleUserStatus = async (targetUser: User) => {
+  const handleToggleUserStatus = async (targetUser: AppUser) => {
     if (user.role === Role.ADMIN && targetUser.role === Role.ADMIN) {
         alert("Aksi tidak diizinkan.");
         return;
@@ -57,19 +56,8 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       await refreshData();
     }
   };
-  
-  const openAddUserModal = () => {
-    if (user.role === Role.SUPER_ADMIN && !serviceRoleKey) {
-        alert("Harap atur 'Kunci Service Role Supabase' di Pengaturan Sistem terlebih dahulu untuk mengundang pengguna baru.");
-        return;
-    }
-    setEditingUser(null);
-    const defaultRole = user.role === Role.SUPER_ADMIN ? Role.ADMIN : Role.SALES;
-    setUserFormData({ name: '', username: '', role: defaultRole, status: AccountStatus.ACTIVE });
-    setUserModalOpen(true);
-  };
 
-  const openEditUserModal = (userToEdit: User) => {
+  const openEditUserModal = (userToEdit: AppUser) => {
     setEditingUser(userToEdit);
     setUserFormData(userToEdit);
     setUserModalOpen(true);
@@ -81,47 +69,26 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         alert("Nama dan email wajib diisi.");
         return;
     }
+    if (!editingUser) {
+        alert("Fungsi ini hanya untuk mengedit pengguna.");
+        return;
+    }
+
     setIsSubmitting(true);
     
-    if (editingUser) {
-        if (user.role === Role.ADMIN && editingUser.role === Role.ADMIN) {
-          alert("Admin tidak dapat mengedit data Admin lain.");
-          setIsSubmitting(false);
-          return;
-        }
-        const { error } = await supabase.from('profiles').update({ name: userFormData.name, username: userFormData.username, role: userFormData.role }).eq('id', editingUser.id);
-        if (error) {
-            alert(`Gagal memperbarui pengguna: ${error.message}`);
-        } else {
-            addActivityLog(`Memperbarui pengguna: ${userFormData.name}`, user);
-            await refreshData();
-            setUserModalOpen(false);
-        }
-    } else {
-        // Invite user with service_role key
-        const tempSupabaseAdmin = createClient(import.meta.env.VITE_SUPABASE_URL!, serviceRoleKey);
-        const { data: inviteData, error: inviteError } = await tempSupabaseAdmin.auth.admin.inviteUserByEmail(userFormData.username!);
-        
-        if(inviteError) {
-             alert(`Gagal mengirim undangan: ${inviteError.message}`);
-        } else if (inviteData.user) {
-            const { error: profileError } = await supabase.from('profiles').insert([{ 
-                id: inviteData.user.id,
-                name: userFormData.name!, 
-                username: userFormData.username!, 
-                role: userFormData.role!, 
-                status: AccountStatus.ACTIVE 
-            }]);
+    if (user.role === Role.ADMIN && editingUser.role === Role.ADMIN) {
+      alert("Admin tidak dapat mengedit data Admin lain.");
+      setIsSubmitting(false);
+      return;
+    }
 
-            if(profileError) {
-                alert(`Undangan terkirim, tapi gagal membuat profil: ${profileError.message}. Harap buat profil manual.`);
-            } else {
-                 addActivityLog(`Mengundang pengguna baru: ${userFormData.name} (${userFormData.username})`, user);
-                 await refreshData();
-                 setUserModalOpen(false);
-                 alert(`Undangan berhasil dikirim ke ${userFormData.username}.`);
-            }
-        }
+    const { error } = await supabase.from('profiles').update({ name: userFormData.name, username: userFormData.username, role: userFormData.role }).eq('id', editingUser.id);
+    if (error) {
+        alert(`Gagal memperbarui pengguna: ${error.message}`);
+    } else {
+        addActivityLog(`Memperbarui pengguna: ${userFormData.name}`, user);
+        await refreshData();
+        setUserModalOpen(false);
     }
     
     setIsSubmitting(false);
@@ -157,7 +124,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         error = result.error;
         if (!error) addActivityLog(`Memperbarui paket: ${name}`, user);
     } else {
-        const result = await supabase.from('packages').insert([{ name, price }]);
+        const result = await supabase.from('packages').insert({ name, price });
         error = result.error;
         if (!error) addActivityLog(`Menambahkan paket baru: ${name}`, user);
     }
@@ -211,7 +178,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
           error = result.error;
           if(!error) addActivityLog(`Memperbarui templat WA: ${waTemplateFormData.name}`, user);
       } else {
-          const result = await supabase.from('whatsapp_templates').insert([waTemplateFormData]);
+          const result = await supabase.from('whatsapp_templates').insert(waTemplateFormData);
           error = result.error;
           if(!error) addActivityLog(`Menambahkan templat WA baru: ${waTemplateFormData.name}`, user);
       }
@@ -248,10 +215,9 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         return (
           <div className="bg-slate-800 rounded-lg p-6">
             <h2 className="text-2xl font-bold text-white mb-2">Kelola Pengguna</h2>
-            <p className="text-sm text-slate-400 mb-6">Undang pengguna baru dengan mengirimkan undangan email untuk mengatur password mereka.</p>
+            <p className="text-sm text-slate-400 mb-6">Untuk menambah pengguna baru, gunakan fitur <strong className="text-white">'Invite user'</strong> di dasbor Supabase Anda.</p>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <button onClick={openAddUserModal} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm">Kirim Undangan</button>
                     <button onClick={exportUsersToExcel} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-lg flex items-center gap-2 text-sm"><DownloadIcon className="h-4 w-4" /> Export</button>
                 </div>
             </div>
@@ -319,16 +285,6 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                  <div className="bg-slate-800 rounded-lg p-6">
                     <h2 className="text-2xl font-bold text-white mb-4">Template WhatsApp</h2><div className="flex justify-between items-center mb-4"><button onClick={() => { setEditingWaTemplate(null); setWaTemplateFormData({name: '', template: ''}); setWaTemplateModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg flex items-center gap-2 text-sm"><PlusCircleIcon className="h-5 w-5"/> Tambah Template</button></div>
                     <div className="space-y-4">{waTemplates.map(t => (<div key={t.id} className="p-4 bg-slate-700/50 rounded-lg"><div className="flex justify-between items-start"><div><p className="font-bold text-white">{t.name}</p><p className="text-sm text-slate-300 whitespace-pre-wrap mt-2">{t.template}</p><p className="text-xs text-slate-500 mt-2">Variabel: {'{nama}, {tagihan}, {jatuh_tempo}'}</p></div><div className="flex gap-3 flex-shrink-0 ml-4"><button onClick={() => { setEditingWaTemplate(t); setWaTemplateFormData(t); setWaTemplateModalOpen(true); }} className="text-blue-400 hover:text-white"><PencilIcon className="h-5 w-5"/></button><button onClick={() => handleDeleteWaTemplate(t.id)} className="text-red-400 hover:text-white"><TrashIcon className="h-5 w-5"/></button></div></div></div>))}{waTemplates.length === 0 && <p className="text-slate-400 text-center py-4">Belum ada templat.</p>}</div></div>
-                 <div className="bg-slate-800 rounded-lg p-6"><h2 className="text-2xl font-bold text-white mb-4">Pengaturan Lanjutan</h2>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Kunci Service Role Supabase</label>
-                        <p className="text-xs text-slate-400 mb-2">Diperlukan untuk mengundang pengguna baru. Dapatkan dari Dashboard Supabase &gt; Project Settings &gt; API.</p>
-                        <div className="flex gap-2">
-                            <input type="password" value={tempServiceRoleKey} onChange={(e) => setTempServiceRoleKey(e.target.value)} placeholder="Masukkan kunci service_role" className="flex-grow bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" />
-                            <button onClick={() => { setServiceRoleKey(tempServiceRoleKey); alert("Kunci berhasil disimpan untuk sesi ini."); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan</button>
-                        </div>
-                    </div>
-                </div>
             </div>
          );
       default:
@@ -346,14 +302,14 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   return (
     <div className="space-y-6">
       {renderContent()}
-      <Modal isOpen={isUserModalOpen} onClose={() => { setUserModalOpen(false); setEditingUser(null); }} title={editingUser ? 'Edit Pengguna' : 'Undang Pengguna Baru'}>
+      <Modal isOpen={isUserModalOpen} onClose={() => { setUserModalOpen(false); setEditingUser(null); }} title={editingUser ? 'Edit Pengguna' : 'Edit Pengguna'}>
          <form onSubmit={handleSaveUser} className="space-y-4">
             <div><label className="block text-sm font-medium text-slate-300 mb-1">Nama Lengkap</label><input type="text" value={userFormData.name || ''} onChange={e => setUserFormData({...userFormData, name: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
-            <div><label className="block text-sm font-medium text-slate-300 mb-1">Email (untuk undangan & login)</label><input type="email" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
+            <div><label className="block text-sm font-medium text-slate-300 mb-1">Email (Username)</label><input type="email" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
              <div><label className="block text-sm font-medium text-slate-300 mb-1">Role</label><select value={userFormData.role || ''} onChange={e => setUserFormData({...userFormData, role: e.target.value as Role})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white">{user.role === Role.SUPER_ADMIN && <option value={Role.ADMIN}>Admin</option>}<option value={Role.SALES}>Sales</option></select></div>
             <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setUserModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg">Batal</button>
-                <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500">Kirim Undangan</button>
+                <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500">Simpan Perubahan</button>
             </div>
         </form>
       </Modal>

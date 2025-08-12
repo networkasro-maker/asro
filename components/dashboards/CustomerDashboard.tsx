@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { User, Customer, InternetPackage, PaymentStatus, IssueReport, ModemLightStatus, CustomerStatus } from '../../types';
+import { AppUser, Customer, InternetPackage, PaymentStatus, IssueReport, ModemLightStatus, CustomerStatus } from '../../types';
 import { supabase } from '../../supabaseClient';
 import { WifiIcon, ClockIcon, CheckCircleIcon, CameraIcon } from '../icons';
 import Modal from '../Modal';
 
 interface CustomerDashboardProps {
-  user: User;
+  user: AppUser;
   packages: InternetPackage[];
   activeView?: string;
   customer?: Customer;
@@ -47,7 +47,7 @@ const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ user, packages, a
           // 'modemVideo' field would contain the URL from Supabase Storage
       };
 
-      const { error } = await supabase.from('issue_reports').insert([reportToInsert]);
+      const { error } = await supabase.from('issue_reports').insert(reportToInsert);
 
       if (error) {
           alert(`Gagal mengirim laporan: ${error.message}`);

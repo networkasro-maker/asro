@@ -1,6 +1,7 @@
 
+
 import React, { useState, useEffect } from 'react';
-import { User, Role, InternetPackage, ActivityLog, Customer, IspProfile, WhatsAppTemplate, IssueReport } from './types';
+import { AppUser, Role, InternetPackage, ActivityLog, Customer, IspProfile, WhatsAppTemplate, IssueReport, AccountStatus } from './types';
 import Login from './components/Login';
 import Layout from './components/Layout';
 import AdminDashboard from './components/dashboards/AdminDashboard';
@@ -13,12 +14,12 @@ import { Session } from '@supabase/supabase-js';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDbInitialized, setIsDbInitialized] = useState<boolean | null>(null);
 
   // States for data from Supabase
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
   const [packages, setPackages] = useState<InternetPackage[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -29,12 +30,10 @@ const App: React.FC = () => {
   const [activeView, setActiveView] = useState('dashboard');
   
   const checkDbInitialization = async () => {
-    // We check if the isp_profile table has any entries.
-    // This is a good indicator of a fresh, uninitialized database.
     const { data, error } = await supabase.from('isp_profile').select('id').limit(1);
     if (error) {
         console.error("Error checking DB initialization:", error);
-        setIsDbInitialized(false); // Assume not initialized if error
+        setIsDbInitialized(false);
         return;
     }
     setIsDbInitialized(data && data.length > 0);
@@ -61,24 +60,52 @@ const App: React.FC = () => {
     }
     
     if (session) {
-      fetchUserProfileAndData(session.user.id);
+      fetchUserProfileAndData(session.user.id, session.user.email!);
     } else {
       setLoading(false);
       setCurrentUser(null);
     }
   }, [session, isDbInitialized]);
 
-  const fetchUserProfileAndData = async (userId: string) => {
+  const fetchUserProfileAndData = async (userId: string, userEmail: string) => {
     setLoading(true);
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    
-    if (error) {
-        console.error('Error fetching user profile:', error);
+    const { data: profileData, error: profileError } = await supabase.from('profiles').select('*').eq('id', userId).single();
+
+    if (profileError && profileError.code === 'PGRST116') { // PGRST116 means "The result contains 0 rows"
+        // This is the "smart login" logic. If the profile doesn't exist, create it.
+        console.log("Profile not found for this user. Creating a new one...");
+        
+        const newProfile = {
+            id: userId,
+            name: userEmail.split('@')[0], // Default name from email
+            username: userEmail,
+            role: userEmail === 'superadmin@asro.net' ? Role.SUPER_ADMIN : Role.CUSTOMER,
+            status: AccountStatus.ACTIVE
+        };
+
+        const { data: createdProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert(newProfile)
+            .select()
+            .single();
+
+        if (createError) {
+            console.error('Failed to create user profile automatically:', createError);
+            await supabase.auth.signOut();
+            setCurrentUser(null);
+        } else if (createdProfile) {
+            console.log("Profile created successfully!");
+            const userWithRole: AppUser = { ...session!.user, ...createdProfile };
+            setCurrentUser(userWithRole);
+            await fetchAllData();
+        }
+
+    } else if (profileError) { // Other, unexpected errors
+        console.error('Error fetching user profile:', profileError);
         await supabase.auth.signOut();
         setCurrentUser(null);
-    } else if (data) {
-        // Here we combine auth.user with our profile data from the 'profiles' table
-        const userWithRole: User = { ...session!.user, ...data };
+    } else if (profileData) { // Profile was found successfully
+        const userWithRole: AppUser = { ...session!.user, ...profileData };
         setCurrentUser(userWithRole);
         await fetchAllData();
     }
@@ -106,7 +133,7 @@ const App: React.FC = () => {
 
     if (packagesRes.data) setPackages(packagesRes.data);
     if (customersRes.data) setCustomers(customersRes.data);
-    if (usersRes.data) setUsers(usersRes.data as User[]);
+    if (usersRes.data) setUsers(usersRes.data as AppUser[]);
     if (ispProfileRes.data) setIspProfile(ispProfileRes.data as IspProfile);
     if (waTemplatesRes.data) setWaTemplates(waTemplatesRes.data);
     if (activityLogsRes.data) setActivityLogs(activityLogsRes.data);
@@ -130,10 +157,10 @@ const App: React.FC = () => {
     checkDbInitialization();
   };
   
-  const addActivityLog = async (action: string, user: User) => {
+  const addActivityLog = async (action: string, user: AppUser) => {
     if (!user) return;
     const newLog = { userId: user.id, userName: user.name, userRole: user.role, action };
-    const { data, error } = await supabase.from('activity_logs').insert([newLog]).select();
+    const { data, error } = await supabase.from('activity_logs').insert(newLog).select();
     if (data) setActivityLogs(prevLogs => [data[0], ...prevLogs]);
     if (error) console.error('Error adding activity log:', error);
   };

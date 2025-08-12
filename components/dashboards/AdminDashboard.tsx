@@ -1,6 +1,7 @@
 
+
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, User, AccountStatus, IspProfile } from '../../types';
+import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, AppUser, AccountStatus, IspProfile } from '../../types';
 import { supabase } from '../../supabaseClient';
 import { CheckCircleIcon, ClockIcon, XCircleIcon, AlertTriangleIcon, UsersIcon, MapPinIcon, FileTextIcon } from '../icons';
 import Modal from '../Modal';
@@ -20,8 +21,8 @@ const statusConfig: { [key: string]: { icon: React.FC<any>; color: string; bg: s
 const CustomerCard: React.FC<{ 
     customer: Customer, 
     packages: InternetPackage[], 
-    users: User[], 
-    user: User, 
+    users: AppUser[], 
+    user: AppUser, 
     onAction: (actionType: string, customer: Customer) => void 
 }> = ({ customer, packages, users, user, onAction }) => {
     const pkg = packages.find(p => p.id === customer.packageId);
@@ -84,12 +85,12 @@ const CustomerCard: React.FC<{
 };
 
 const AdminDashboard: React.FC<{
-  user: User;
+  user: AppUser;
   activeView?: string;
   packages: InternetPackage[];
-  addActivityLog: (action: string, user: User) => void;
+  addActivityLog: (action: string, user: AppUser) => void;
   customers: Customer[];
-  users: User[];
+  users: AppUser[];
   ispProfile: IspProfile;
   refreshData: () => Promise<void>;
 }> = ({ user, activeView, packages, addActivityLog, customers, users, ispProfile, refreshData }) => {
@@ -154,7 +155,7 @@ const AdminDashboard: React.FC<{
         }
     }, [invoiceCustomer]);
 
-    const performDbAction = async (updateLogic: () => Promise<any>, successLog: string) => {
+    const performDbAction = async (updateLogic: () => PromiseLike<any>, successLog: string) => {
         setIsSubmitting(true);
         const { error } = await updateLogic();
         if (error) {
@@ -248,11 +249,11 @@ const AdminDashboard: React.FC<{
             userId: null,
         };
         
-        const { data, error } = await supabase.from('customers').insert([newCustomer]).select().single();
+        const { data, error } = await supabase.from('customers').insert(newCustomer).select().single();
 
         if (error) {
             alert(`Gagal menambah pelanggan: ${error.message}`);
-        } else {
+        } else if (data) {
             addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${data.id})`, user);
             await refreshData();
             setAddCustomerModalOpen(false);

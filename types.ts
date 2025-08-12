@@ -1,4 +1,5 @@
 
+
 export enum Role {
   SUPER_ADMIN = 'Super Admin',
   ADMIN = 'Admin',
@@ -28,7 +29,7 @@ export enum ModemLightStatus {
     OFF = 'Semua Lampu Mati'
 }
 
-export interface User {
+export interface AppUser {
   id: string;
   username: string;
   password?: string;
@@ -128,14 +129,6 @@ export interface Database {
           userName?: string
           userRole?: Role
         }
-        Relationships: [
-          {
-            foreignKeyName: "activity_logs_userId_fkey"
-            columns: ["userId"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       customers: {
         Row: {
@@ -180,20 +173,6 @@ export interface Database {
           status?: CustomerStatus
           userId?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "customers_packageId_fkey"
-            columns: ["packageId"]
-            referencedRelation: "packages"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customers_salesId_fkey"
-            columns: ["salesId"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       issue_reports: {
         Row: {
@@ -220,14 +199,6 @@ export interface Database {
           modemVideo?: string | null
           reportedAt?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "issue_reports_customerId_fkey"
-            columns: ["customerId"]
-            referencedRelation: "customers"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       isp_profile: {
         Row: {
@@ -254,7 +225,6 @@ export interface Database {
           logoUrl?: string
           name?: string
         }
-        Relationships: []
       }
       packages: {
         Row: {
@@ -272,7 +242,6 @@ export interface Database {
           name?: string
           price?: number
         }
-        Relationships: []
       }
       profiles: {
         Row: {
@@ -299,14 +268,6 @@ export interface Database {
           username?: string
           profilePicture?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "profiles_id_fkey"
-            columns: ["id"]
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          }
-        ]
       }
       whatsapp_templates: {
         Row: {
@@ -324,7 +285,6 @@ export interface Database {
           name?: string
           template?: string
         }
-        Relationships: []
       }
     }
     Views: {}

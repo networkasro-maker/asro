@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Role, User, IspProfile } from '../types';
+import { Role, AppUser, IspProfile } from '../types';
 import { HomeIcon, UsersIcon, PackageIcon, SettingsIcon, LogoutIcon, BarChartIcon, FileTextIcon, MenuIcon, XIcon, AlertTriangleIcon, ClipboardListIcon, MessageSquareIcon, KeyIcon } from './icons';
 import ChangePasswordModal from './ChangePasswordModal';
 
 interface LayoutProps {
-  user: User;
+  user: AppUser;
   onLogout: () => void;
   children: React.ReactNode;
   onPasswordUpdate: (userId: string, oldPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
