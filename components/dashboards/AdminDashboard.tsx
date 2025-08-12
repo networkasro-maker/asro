@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Customer, CustomerStatus, InternetPackage, PaymentStatus, Role, User, AccountStatus, IspProfile } from '../../types';
 import { supabase } from '../../supabaseClient';
@@ -233,34 +234,30 @@ const AdminDashboard: React.FC<{
         }
         setIsSubmitting(true);
         
-        // In a real-world scenario, you'd use a Supabase Edge Function to create both
-        // the auth.user and the profile securely. From the client, we can only do this.
-        // This will create the customer, but they won't be able to log in until an admin sets a password
-        // for them in the Supabase dashboard.
-        const customerId = `CUST-${Date.now()}`;
-        const userId = `USER-${Date.now()}`; // Placeholder, will be replaced by an actual auth user id
-        
-        const { error } = await supabase.from('customers').insert([{
-            id: customerId,
+        // This customer will not have a login account initially.
+        // The userId can be linked later if they are given an account.
+        const newCustomer: Omit<Customer, 'id' | 'userId'> & { userId: null } = {
             name,
             address,
-            phone,
+            phone: phone || undefined,
             dueDate,
             packageId,
             salesId,
             status: CustomerStatus.ACTIVE,
             paymentStatus: PaymentStatus.UNPAID,
-            userId: userId, // This should be linked to a real auth user
-        }]);
+            userId: null,
+        };
+        
+        const { data, error } = await supabase.from('customers').insert([newCustomer]).select().single();
 
         if (error) {
             alert(`Gagal menambah pelanggan: ${error.message}`);
         } else {
-            addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${customerId})`, user);
+            addActivityLog(`Menambahkan pelanggan baru: ${name} (ID: ${data.id})`, user);
             await refreshData();
             setAddCustomerModalOpen(false);
             setNewCustomerData({ name: '', address: '', phone: '', packageId: packages[0]?.id || '', salesId: '', dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0] });
-            alert("Pelanggan baru berhasil ditambahkan. Ingatkan pelanggan untuk mengatur password mereka.");
+            alert("Pelanggan baru berhasil ditambahkan.");
         }
         setIsSubmitting(false);
     };

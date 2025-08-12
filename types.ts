@@ -1,3 +1,4 @@
+
 export enum Role {
   SUPER_ADMIN = 'Super Admin',
   ADMIN = 'Admin',
@@ -55,7 +56,7 @@ export interface Customer {
   location?: { lat: number; lng: number };
   status: CustomerStatus;
   paymentStatus: PaymentStatus;
-  userId: string;
+  userId: string | null;
 }
 
 export interface IssueReport {
@@ -149,13 +150,13 @@ export interface Database {
           phone: string | null
           salesId: string
           status: CustomerStatus
-          userId: string
+          userId: string | null
         }
         Insert: {
           address: string
           dueDate: string
           housePhoto?: string | null
-          id: string
+          id?: string
           location?: Json | null
           name: string
           packageId: string
@@ -163,7 +164,7 @@ export interface Database {
           phone?: string | null
           salesId: string
           status: CustomerStatus
-          userId: string
+          userId?: string | null
         }
         Update: {
           address?: string
@@ -177,7 +178,7 @@ export interface Database {
           phone?: string | null
           salesId?: string
           status?: CustomerStatus
-          userId?: string
+          userId?: string | null
         }
         Relationships: [
           {
@@ -189,12 +190,6 @@ export interface Database {
           {
             foreignKeyName: "customers_salesId_fkey"
             columns: ["salesId"]
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "customers_userId_fkey"
-            columns: ["userId"]
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           }
@@ -332,17 +327,9 @@ export interface Database {
         Relationships: []
       }
     }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      [_ in never]: never
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
+    Views: {}
+    Functions: {}
+    Enums: {}
+    CompositeTypes: {}
   }
 }

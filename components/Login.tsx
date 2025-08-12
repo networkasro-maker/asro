@@ -20,7 +20,7 @@ const Login: React.FC<LoginProps> = ({ ispProfile }) => {
     setError('');
 
     // First, try to sign in
-    const { data: { user: authUser, session }, error: signInError } = await supabase.auth.signInWithPassword({
+    const { data: { user: authUser }, error: signInError } = await supabase.auth.signInWithPassword({
       email: email,
       password: password,
     });
@@ -42,6 +42,9 @@ const Login: React.FC<LoginProps> = ({ ispProfile }) => {
         if (profileError) {
             setError("Gagal memuat profil pengguna.");
             await supabase.auth.signOut(); // Log out if profile can't be fetched
+        } else if (!profile) {
+            setError("Profil pengguna tidak ditemukan.");
+            await supabase.auth.signOut();
         } else if (profile.status === AccountStatus.FROZEN) {
             setError('Akun Anda telah dibekukan. Hubungi administrator.');
             await supabase.auth.signOut(); // Log out frozen user

@@ -1,8 +1,9 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Role, InternetPackage, IspProfile, WhatsAppTemplate, AccountStatus, ActivityLog } from '../../types';
 import Modal from '../Modal';
 import { supabase } from '../../supabaseClient';
-import { UploadIcon, DownloadIcon, PencilIcon, TrashIcon, PlusCircleIcon } from '../icons';
+import { DownloadIcon, PencilIcon, TrashIcon, PlusCircleIcon, KeyIcon } from '../icons';
 
 declare var XLSX: any;
 
@@ -27,21 +28,19 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   const [isUserModalOpen, setUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [userFormData, setUserFormData] = useState<Partial<User>>({ name: '', username: '', role: Role.SALES });
-  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isPackageModalOpen, setPackageModalOpen] = useState(false);
   const [editingPackage, setEditingPackage] = useState<InternetPackage | null>(null);
 
   const [profileForm, setProfileForm] = useState(ispProfile);
   useEffect(() => { setProfileForm(ispProfile) }, [ispProfile]);
-  
-  const [isBankAccountModalOpen, setBankAccountModalOpen] = useState(false);
-  const [editingBankAccount, setEditingBankAccount] = useState<{ bank: IspProfile['bankAccounts'][0]; index: number } | null>(null);
-  const [bankAccountFormData, setBankAccountFormData] = useState({ bankName: '', accountNumber: '', accountName: '' });
-  
+    
   const [isWaTemplateModalOpen, setWaTemplateModalOpen] = useState(false);
   const [editingWaTemplate, setEditingWaTemplate] = useState<WhatsAppTemplate | null>(null);
   const [waTemplateFormData, setWaTemplateFormData] = useState<Omit<WhatsAppTemplate, 'id'>>({ name: '', template: '' });
+  
+  const [serviceRoleKey, setServiceRoleKey] = useState('');
+  const [tempServiceRoleKey, setTempServiceRoleKey] = useState('');
 
   const handleToggleUserStatus = async (targetUser: User) => {
     if (user.role === Role.ADMIN && targetUser.role === Role.ADMIN) {
@@ -60,6 +59,10 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   };
   
   const openAddUserModal = () => {
+    if (user.role === Role.SUPER_ADMIN && !serviceRoleKey) {
+        alert("Harap atur 'Kunci Service Role Supabase' di Pengaturan Sistem terlebih dahulu untuk mengundang pengguna baru.");
+        return;
+    }
     setEditingUser(null);
     const defaultRole = user.role === Role.SUPER_ADMIN ? Role.ADMIN : Role.SALES;
     setUserFormData({ name: '', username: '', role: defaultRole, status: AccountStatus.ACTIVE });
@@ -75,7 +78,7 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userFormData.name || !userFormData.username) {
-        alert("Nama dan username wajib diisi.");
+        alert("Nama dan email wajib diisi.");
         return;
     }
     setIsSubmitting(true);
@@ -95,24 +98,29 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
             setUserModalOpen(false);
         }
     } else {
-        // IMPORTANT: This only creates a user PROFILE, not an AUTHENTICATION user.
-        // The new user cannot log in until an admin sets their password in the Supabase Dashboard.
-        // The following logic is likely to fail at runtime due to foreign key constraints,
-        // but it is modified to satisfy TypeScript type requirements.
-        const { error } = await supabase.from('profiles').insert([{ 
-            id: `new-user-${Date.now()}`,
-            name: userFormData.name!, 
-            username: userFormData.username!, 
-            role: userFormData.role!, 
-            status: AccountStatus.ACTIVE 
-        }]);
-        if(error) {
-            alert(`Gagal menambah pengguna: ${error.message}`);
-        } else {
-            addActivityLog(`Menambahkan profil pengguna baru: ${userFormData.name}`, user);
-            await refreshData();
-            setUserModalOpen(false);
-            alert(`Profil untuk ${userFormData.name} berhasil dibuat. Harap atur password untuk pengguna ini di dashboard Supabase agar bisa login.`);
+        // Invite user with service_role key
+        const tempSupabaseAdmin = createClient(import.meta.env.VITE_SUPABASE_URL!, serviceRoleKey);
+        const { data: inviteData, error: inviteError } = await tempSupabaseAdmin.auth.admin.inviteUserByEmail(userFormData.username!);
+        
+        if(inviteError) {
+             alert(`Gagal mengirim undangan: ${inviteError.message}`);
+        } else if (inviteData.user) {
+            const { error: profileError } = await supabase.from('profiles').insert([{ 
+                id: inviteData.user.id,
+                name: userFormData.name!, 
+                username: userFormData.username!, 
+                role: userFormData.role!, 
+                status: AccountStatus.ACTIVE 
+            }]);
+
+            if(profileError) {
+                alert(`Undangan terkirim, tapi gagal membuat profil: ${profileError.message}. Harap buat profil manual.`);
+            } else {
+                 addActivityLog(`Mengundang pengguna baru: ${userFormData.name} (${userFormData.username})`, user);
+                 await refreshData();
+                 setUserModalOpen(false);
+                 alert(`Undangan berhasil dikirim ke ${userFormData.username}.`);
+            }
         }
     }
     
@@ -129,10 +137,6 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       XLSX.utils.book_append_sheet(wb, ws, "Pengguna");
       XLSX.writeFile(wb, "Daftar_Pengguna_ASRO_NET.xlsx");
       addActivityLog('Mengekspor data pengguna ke Excel.', user);
-  };
-
-  const handleUserImport = (event: React.ChangeEvent<HTMLInputElement>) => {
-      alert("Fitur impor pengguna melalui Excel memerlukan penyesuaian lebih lanjut di sisi backend (Edge Function) dan untuk sementara dinonaktifkan di versi ini.");
   };
 
   const handleSavePackage = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -234,9 +238,6 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
       }
   };
 
-  // Other handlers like Bank Account need similar async/await conversion.
-  // For brevity, some handlers are simplified.
-
   const renderContent = () => {
     switch (activeView) {
       case 'users':
@@ -247,10 +248,10 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
         return (
           <div className="bg-slate-800 rounded-lg p-6">
             <h2 className="text-2xl font-bold text-white mb-2">Kelola Pengguna</h2>
-            <p className="text-sm text-slate-400 mb-6">Catatan: Menambah pengguna di sini hanya membuat profil. Password harus diatur di dashboard Supabase agar bisa login.</p>
+            <p className="text-sm text-slate-400 mb-6">Undang pengguna baru dengan mengirimkan undangan email untuk mengatur password mereka.</p>
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
-                    <button onClick={openAddUserModal} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm">Tambah Akun</button>
+                    <button onClick={openAddUserModal} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm">Kirim Undangan</button>
                     <button onClick={exportUsersToExcel} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-3 rounded-lg flex items-center gap-2 text-sm"><DownloadIcon className="h-4 w-4" /> Export</button>
                 </div>
             </div>
@@ -318,6 +319,16 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
                  <div className="bg-slate-800 rounded-lg p-6">
                     <h2 className="text-2xl font-bold text-white mb-4">Template WhatsApp</h2><div className="flex justify-between items-center mb-4"><button onClick={() => { setEditingWaTemplate(null); setWaTemplateFormData({name: '', template: ''}); setWaTemplateModalOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg flex items-center gap-2 text-sm"><PlusCircleIcon className="h-5 w-5"/> Tambah Template</button></div>
                     <div className="space-y-4">{waTemplates.map(t => (<div key={t.id} className="p-4 bg-slate-700/50 rounded-lg"><div className="flex justify-between items-start"><div><p className="font-bold text-white">{t.name}</p><p className="text-sm text-slate-300 whitespace-pre-wrap mt-2">{t.template}</p><p className="text-xs text-slate-500 mt-2">Variabel: {'{nama}, {tagihan}, {jatuh_tempo}'}</p></div><div className="flex gap-3 flex-shrink-0 ml-4"><button onClick={() => { setEditingWaTemplate(t); setWaTemplateFormData(t); setWaTemplateModalOpen(true); }} className="text-blue-400 hover:text-white"><PencilIcon className="h-5 w-5"/></button><button onClick={() => handleDeleteWaTemplate(t.id)} className="text-red-400 hover:text-white"><TrashIcon className="h-5 w-5"/></button></div></div></div>))}{waTemplates.length === 0 && <p className="text-slate-400 text-center py-4">Belum ada templat.</p>}</div></div>
+                 <div className="bg-slate-800 rounded-lg p-6"><h2 className="text-2xl font-bold text-white mb-4">Pengaturan Lanjutan</h2>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Kunci Service Role Supabase</label>
+                        <p className="text-xs text-slate-400 mb-2">Diperlukan untuk mengundang pengguna baru. Dapatkan dari Dashboard Supabase &gt; Project Settings &gt; API.</p>
+                        <div className="flex gap-2">
+                            <input type="password" value={tempServiceRoleKey} onChange={(e) => setTempServiceRoleKey(e.target.value)} placeholder="Masukkan kunci service_role" className="flex-grow bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" />
+                            <button onClick={() => { setServiceRoleKey(tempServiceRoleKey); alert("Kunci berhasil disimpan untuk sesi ini."); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Simpan</button>
+                        </div>
+                    </div>
+                </div>
             </div>
          );
       default:
@@ -335,14 +346,14 @@ const ManagementDashboard: React.FC<ManagementDashboardProps> = ({
   return (
     <div className="space-y-6">
       {renderContent()}
-      <Modal isOpen={isUserModalOpen} onClose={() => { setUserModalOpen(false); setEditingUser(null); }} title={editingUser ? 'Edit Pengguna' : 'Tambah Profil Baru'}>
+      <Modal isOpen={isUserModalOpen} onClose={() => { setUserModalOpen(false); setEditingUser(null); }} title={editingUser ? 'Edit Pengguna' : 'Undang Pengguna Baru'}>
          <form onSubmit={handleSaveUser} className="space-y-4">
             <div><label className="block text-sm font-medium text-slate-300 mb-1">Nama Lengkap</label><input type="text" value={userFormData.name || ''} onChange={e => setUserFormData({...userFormData, name: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
-            <div><label className="block text-sm font-medium text-slate-300 mb-1">Email (untuk login)</label><input type="email" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
+            <div><label className="block text-sm font-medium text-slate-300 mb-1">Email (untuk undangan & login)</label><input type="email" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white" required /></div>
              <div><label className="block text-sm font-medium text-slate-300 mb-1">Role</label><select value={userFormData.role || ''} onChange={e => setUserFormData({...userFormData, role: e.target.value as Role})} className="w-full bg-slate-700 border border-slate-600 rounded-lg p-2 text-white">{user.role === Role.SUPER_ADMIN && <option value={Role.ADMIN}>Admin</option>}<option value={Role.SALES}>Sales</option></select></div>
             <div className="pt-4 flex justify-end gap-3">
                 <button type="button" onClick={() => setUserModalOpen(false)} className="bg-slate-600 text-white font-bold py-2 px-4 rounded-lg">Batal</button>
-                <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500">Simpan</button>
+                <button type="submit" disabled={isSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-slate-500">Kirim Undangan</button>
             </div>
         </form>
       </Modal>
